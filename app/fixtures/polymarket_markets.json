@@ -1,0 +1,31 @@
+[
+  {
+    "id": "demo_mkt_1",
+    "eventId": "demo_evt_1",
+    "slug": "will-demo-candidate-win",
+    "question": "Will Demo Candidate win the Exampleland mayoral election?",
+    "description": "Resolves YES if the official election authority declares Demo Candidate the winner, otherwise NO.",
+    "outcomes": ["YES", "NO"],
+    "tokenIds": ["demo_token_yes_1", "demo_token_no_1"],
+    "category": "Politics",
+    "active": true,
+    "closed": false,
+    "liquidity": 5000,
+    "volume": 12000
+  },
+  {
+    "id": "demo_mkt_2",
+    "eventId": "demo_evt_2",
+    "slug": "will-central-bank-cut",
+    "question": "Will the Exampleland central bank cut rates at the next meeting?",
+    "description": "Resolves YES if the central bank announces a rate cut at the next scheduled meeting.",
+    "outcomes": ["YES", "NO"],
+    "tokenIds": ["demo_token_yes_2", "demo_token_no_2"],
+    "category": "Economy",
+    "active": true,
+    "closed": false,
+    "liquidity": 2500,
+    "volume": 9000
+  }
+]
+

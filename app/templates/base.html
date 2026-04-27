@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or "Polymarket Paper MVP" }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-slate-950 text-slate-100">
+    <div class="max-w-6xl mx-auto px-4 py-6">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <div class="text-xl font-semibold">Polymarket News-Reaction (Paper MVP)</div>
+          <div class="text-xs text-slate-400">Paper trading only • Whitelisted sources only • High-confidence or abstain</div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <form class="js-async-job" method="post" action="/api/jobs/sync_markets" data-job-label="Sync markets" data-done-url="/markets">
+            <button type="submit" class="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm">Sync markets</button>
+          </form>
+          <form class="js-async-job" method="post" action="/api/jobs/poll_news" data-job-label="Poll news" data-done-url="/news">
+            <button type="submit" class="px-3 py-2 rounded bg-sky-600 hover:bg-sky-500 text-sm">Poll news</button>
+          </form>
+          <form class="js-async-job" method="post" action="/api/jobs/process_candidates" data-job-label="Process candidates" data-done-url="/signals">
+            <button type="submit" class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm">Process candidates</button>
+          </form>
+          <form class="js-async-job" method="post" action="/api/lag-measurements/backfill" data-job-label="Backfill lags" data-done-url="/analysis/lags">
+            <button type="submit" class="px-3 py-2 rounded bg-fuchsia-600 hover:bg-fuchsia-500 text-sm">Backfill lags</button>
+          </form>
+          <form class="js-async-job" method="post" action="/api/jobs/compute_signal_metrics" data-job-label="Signal metrics" data-done-url="/analysis">
+            <button type="submit" class="px-3 py-2 rounded bg-cyan-700 hover:bg-cyan-600 text-sm">Signal metrics</button>
+          </form>
+          <form class="js-async-job" method="post" action="/api/jobs/compute_lag_ranks" data-job-label="Lag ranks" data-done-url="/analysis/laggy-markets">
+            <button type="submit" class="px-3 py-2 rounded bg-violet-700 hover:bg-violet-600 text-sm">Lag ranks</button>
+          </form>
+          <form class="js-async-job" method="post" action="/api/jobs/settle_trades" data-job-label="Settle trades" data-done-url="/trades">
+            <button type="submit" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Settle trades</button>
+          </form>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-500 mb-4 max-w-4xl leading-relaxed">
+        <strong class="text-slate-400">Automation:</strong> by default the server also runs <strong>Poll news</strong> every <code class="text-slate-400">background_poll_news_interval_seconds</code> (600s), <strong>Process candidates</strong> every <code class="text-slate-400">background_process_candidates_interval_seconds</code> (540s), and the lag pipeline every <code class="text-slate-400">background_lag_pipeline_interval_seconds</code> (3600s). Set any interval to <code class="text-slate-400">0</code> in <code class="text-slate-400">.env</code> to disable that loop. Market price sync still runs every <code class="text-slate-400">snapshot_interval_seconds</code>; settle trades every <code class="text-slate-400">background_settle_interval_seconds</code>.
+      </p>
+
+      <div
+        id="job-toast"
+        role="status"
+        aria-live="polite"
+        class="hidden fixed bottom-6 left-1/2 z-50 max-w-xl -translate-x-1/2 rounded-lg border border-slate-600 bg-slate-900 px-4 py-3 text-sm text-slate-100 shadow-xl"
+      ></div>
+
+      <div class="flex gap-2 mb-6 text-sm">
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/">Dashboard</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/markets">Markets</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/news">News</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/signals">Signals</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/trades">Paper trades</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis">Analysis</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/lags">Lag analysis</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/laggy-markets">Laggy markets</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/soft-accuracy">Soft accuracy</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/settings">Settings</a>
+      </div>
+
+      {% block content %}{% endblock %}
+    </div>
+    <script>
+      (function () {
+        var toast = document.getElementById("job-toast");
+        if (!toast) return;
+
+        function showToast(message, isError) {
+          toast.textContent = message;
+          toast.classList.remove("hidden");
+          toast.classList.toggle("border-red-500", !!isError);
+          toast.classList.toggle("border-slate-600", !isError);
+        }
+
+        function formatPayload(data) {
+          if (!data || typeof data !== "object") return "";
+          return Object.keys(data)
+            .map(function (k) {
+              return k + ": " + data[k];
+            })
+            .join(" · ");
+        }
+
+        document.querySelectorAll("form.js-async-job").forEach(function (form) {
+          form.addEventListener("submit", function (e) {
+            e.preventDefault();
+            var label = form.getAttribute("data-job-label") || "Job";
+            var doneUrl = form.getAttribute("data-done-url");
+            showToast(label + "… running (please wait)", false);
+
+            fetch(form.action, {
+              method: "POST",
+              headers: { Accept: "application/json" },
+              credentials: "same-origin",
+            })
+              .then(function (r) {
+                return r.text().then(function (text) {
+                  var data = null;
+                  try {
+                    data = text ? JSON.parse(text) : null;
+                  } catch (err) {
+                    data = { raw: text.slice(0, 200) };
+                  }
+                  return { ok: r.ok, status: r.status, data: data };
+                });
+              })
+              .then(function (res) {
+                if (!res.ok) {
+                  var detail =
+                    res.data && res.data.detail !== undefined
+                      ? JSON.stringify(res.data.detail)
+                      : res.data
+                        ? JSON.stringify(res.data)
+                        : "HTTP " + res.status;
+                  showToast(label + " failed — " + detail, true);
+                  return;
+                }
+                var summary = formatPayload(res.data);
+                showToast(label + " complete — " + (summary || "ok"), false);
+                if (doneUrl) {
+                  setTimeout(function () {
+                    window.location.href = doneUrl;
+                  }, 1400);
+                }
+              })
+              .catch(function (err) {
+                showToast(label + " failed — " + err, true);
+              });
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">Signal Analysis</h1>
+<p class="text-slate-400 text-sm mb-6">
+  Summary of all ACT signals processed. For detailed lag metrics, see
+  <a href="/analysis/lags" class="text-blue-400 underline">Lag Analysis</a>.
+</p>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+  <div class="bg-slate-800 rounded p-4">
+    <div class="text-2xl font-bold">{{ act_count }}</div>
+    <div class="text-slate-400 text-sm">ACT signals</div>
+  </div>
+  <div class="bg-slate-800 rounded p-4">
+    <div class="text-2xl font-bold">{{ crossed_count }}</div>
+    <div class="text-slate-400 text-sm">Price crossed +10pt</div>
+  </div>
+  <div class="bg-slate-800 rounded p-4">
+    <div class="text-2xl font-bold">{{ correct_count }}</div>
+    <div class="text-slate-400 text-sm">Signals correct (resolved markets)</div>
+  </div>
+  <div class="bg-slate-800 rounded p-4">
+    <div class="text-2xl font-bold">{{ median_lag or "—" }}</div>
+    <div class="text-slate-400 text-sm">Median +10pt lag</div>
+  </div>
+</div>
+
+<h2 class="text-lg font-semibold mb-3">Price Lag Status Breakdown</h2>
+<table class="w-full text-sm">
+  <thead><tr class="text-slate-400 text-left">
+    <th class="py-1 pr-4">Status</th><th class="py-1">Count</th>
+  </tr></thead>
+  <tbody>
+  {% if status_counts %}
+    {% for row in status_counts %}
+      <tr class="border-t border-slate-800">
+        <td class="py-1 pr-4">{{ row.status }}</td>
+        <td class="py-1">{{ row.count }}</td>
+      </tr>
+    {% endfor %}
+  {% else %}
+    <tr>
+      <td colspan="2" class="py-8 text-center text-slate-500 text-sm">
+        No lag measurements yet — run a backfill after signals have been processed.
+      </td>
+    </tr>
+  {% endif %}
+  </tbody>
+</table>
+{% endblock %}

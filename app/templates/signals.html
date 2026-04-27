@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+  <p class="text-slate-400 text-sm mb-4 border-l-2 border-slate-600 pl-3">
+    A <strong class="text-slate-200">signal</strong> is created when a news article matches a market.
+    <strong class="text-slate-200">ACT</strong> = passed all quality gates, a paper trade was simulated.
+    <strong class="text-slate-200">ABSTAIN</strong> = rejected (not enough confidence or evidence).
+    <strong class="text-slate-200">NO_TRADE_*</strong> = failed a market quality gate (liquidity or spread).
+  </p>
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-sm font-semibold mb-3">Signals (latest 200)</div>
+    <div class="overflow-auto">
+      <table class="w-full text-sm">
+        <thead class="text-slate-400">
+          <tr>
+            <th class="text-left py-2 pr-3">time</th>
+            <th class="text-left py-2 pr-3">market</th>
+            <th class="text-left py-2 pr-3">article</th>
+            <th class="text-left py-2 pr-3">relevance</th>
+            <th class="text-left py-2 pr-3">outcome</th>
+            <th class="text-left py-2 pr-3">conf</th>
+            <th class="text-left py-2 pr-3">verifier</th>
+            <th class="text-left py-2 pr-3">action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if signals %}
+            {% for s in signals %}
+              <tr class="border-t border-slate-800 align-top">
+                <td class="py-2 pr-3 whitespace-nowrap">{{ s.created_at }}</td>
+                <td class="py-2 pr-3 whitespace-nowrap text-slate-300">{{ s.market_id }}</td>
+                <td class="py-1 pr-4 max-w-[280px] truncate">
+                  {% if s.article %}
+                    <a href="{{ s.article.url }}" target="_blank"
+                       class="text-blue-400 hover:underline" title="{{ s.article.title }}">
+                      {{ s.article.title[:80] }}{% if s.article.title|length > 80 %}…{% endif %}
+                    </a>
+                  {% else %}—{% endif %}
+                </td>
+                <td class="py-2 pr-3">{{ "%.2f"|format(s.relevance_score) }}</td>
+                <td class="py-2 pr-3">{{ s.interpreted_outcome }} ({{ s.evidence_type }})</td>
+                <td class="py-2 pr-3">{{ "%.2f"|format(s.confidence) }}</td>
+                <td class="py-2 pr-3">{% if s.verifier_agrees %}agree{% else %}disagree{% endif %} ({{ "%.2f"|format(s.verifier_confidence) }})</td>
+                <td class="py-2 pr-3">{{ s.action }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="8" class="py-8 text-center text-slate-500 text-sm">
+                No signals yet — click <strong>Process candidates</strong> to analyse recent news.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
+

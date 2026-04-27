@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+  <p class="text-slate-400 text-sm mb-4 border-l-2 border-slate-600 pl-3">
+    Paper trades are simulated only — no real money moves.
+    <strong class="text-slate-200">Fill</strong> = conservative simulated entry price (ask + 1% slippage).
+    <strong class="text-slate-200">Live PnL</strong> = unrealised gain/loss at the current market mid-price.
+    Trades settle automatically at T+24h using a market snapshot.
+  </p>
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-sm font-semibold mb-3">Paper trades (latest 200)</div>
+    <div class="overflow-auto">
+      <table class="w-full text-sm">
+        <thead class="text-slate-400">
+          <tr>
+            <th class="text-left py-2 pr-3">time</th>
+            <th class="text-left py-2 pr-3">market</th>
+            <th class="text-left py-2 pr-3">side</th>
+            <th class="text-left py-2 pr-3">size</th>
+            <th class="text-left py-2 pr-3">fill</th>
+            <th class="text-left py-2 pr-3">mid@signal</th>
+            <th class="text-left py-2 pr-3">conf</th>
+            <th class="text-left py-2 pr-3">status</th>
+            <th class="text-left py-2 pr-3">Live PnL</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if trades %}
+            {% for row in trades %}
+              {% set t = row.trade %}
+              <tr class="border-t border-slate-800 align-top">
+                <td class="py-2 pr-3 whitespace-nowrap">{{ t.created_at }}</td>
+                <td class="py-2 pr-3 whitespace-nowrap text-slate-300">{{ t.market_id }}</td>
+                <td class="py-2 pr-3">{{ t.side }}</td>
+                <td class="py-2 pr-3">{{ "%.2f"|format(t.simulated_size) }}</td>
+                <td class="py-2 pr-3">{{ "%.4f"|format(t.fill_price) }}</td>
+                <td class="py-2 pr-3">{{ t.mid_at_signal or "" }}</td>
+                <td class="py-2 pr-3">{{ "%.2f"|format(t.confidence) }}</td>
+                <td class="py-2 pr-3">{{ t.status }}</td>
+                <td class="py-2 pr-3">
+                  {% if row.live_pnl is not none %}
+                    <span class="{{ 'text-green-400' if row.live_pnl >= 0 else 'text-red-400' }}">
+                      {{ '%+.2f' % row.live_pnl }}
+                    </span>
+                  {% elif t.pnl_final is not none %}
+                    <span class="{{ 'text-green-400' if t.pnl_final >= 0 else 'text-red-400' }}">
+                      {{ '%+.2f' % t.pnl_final }} (final)
+                    </span>
+                  {% else %}—{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="9" class="py-8 text-center text-slate-500 text-sm">
+                No paper trades yet — signals must pass all quality gates before a trade is simulated.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
+

@@ -1,0 +1,360 @@
+from __future__ import annotations
+
+import datetime as dt
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import case, desc, func, literal, select
+from sqlalchemy.orm import selectinload
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dashboard_data import get_dashboard_snapshot
+from app.db import get_session
+from app.job_status import build_system_status
+from app.models import (
+    LagMeasurement,
+    LagThresholdCrossing,
+    Market,
+    MarketLagScore,
+    NewsArticle,
+    NewsSignal,
+    NewsSource,
+    PaperTrade,
+    PriceSnapshot,
+    ResolutionSourceMapping,
+    RuntimeSetting,
+    SignalDriftWindow,
+    ThresholdProfile,
+)
+from app.settings import settings as app_settings
+from app.threshold_context import RUNTIME_KEY_THRESHOLD_PROFILE, resolve_trading_thresholds
+from app.threshold_profiles_seed import ensure_default_threshold_profiles
+from app.util import format_lag_seconds, new_id, now_utc
+
+
+router = APIRouter()
+templates = Jinja2Templates(directory="app/templates")
+templates.env.filters["format_lag"] = format_lag_seconds
+
+
+@router.get("/", response_class=HTMLResponse)
+async def dashboard(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    ctx = await get_dashboard_snapshot(session)
+    ctx["request"] = request
+    ctx["dashboard_sse_enabled"] = app_settings.dashboard_sse_enabled
+    ctx["system_status"] = await build_system_status(session)
+    # Template expects ORM rows for initial render; reuse snapshot dict + raw rows for table.
+    recent = (
+        await session.execute(select(NewsSignal).order_by(desc(NewsSignal.created_at)).limit(20))
+    ).scalars().all()
+    ctx["recent_signals"] = recent
+    return templates.TemplateResponse("dashboard.html", ctx)
+
+
+@router.get("/markets", response_class=HTMLResponse)
+async def markets(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    rows = (await session.execute(select(Market).order_by(desc(Market.updated_at)).limit(200))).scalars().all()
+    return templates.TemplateResponse("markets.html", {"request": request, "markets": rows})
+
+
+@router.get("/news", response_class=HTMLResponse)
+async def news(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    rows = (await session.execute(select(NewsArticle).order_by(desc(NewsArticle.published_at)).limit(200))).scalars().all()
+    return templates.TemplateResponse("news.html", {"request": request, "articles": rows})
+
+
+@router.get("/signals", response_class=HTMLResponse)
+async def signals(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    rows = (
+        await session.execute(
+            select(NewsSignal)
+            .options(selectinload(NewsSignal.article))
+            .order_by(desc(NewsSignal.created_at))
+            .limit(200)
+        )
+    ).scalars().all()
+    return templates.TemplateResponse("signals.html", {"request": request, "signals": rows})
+
+
+@router.get("/trades", response_class=HTMLResponse)
+async def trades(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    trade_list = (await session.execute(select(PaperTrade).order_by(desc(PaperTrade.created_at)).limit(200))).scalars().all()
+
+    market_ids = list({t.market_id for t in trade_list})
+    live_prices: dict[str, float] = {}
+    for mid in market_ids:
+        snap = (
+            await session.execute(
+                select(PriceSnapshot)
+                .where(PriceSnapshot.market_id == mid)
+                .order_by(PriceSnapshot.timestamp.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if snap is not None and snap.mid_yes is not None:
+            live_prices[mid] = float(snap.mid_yes)
+
+    trades_with_pnl = []
+    for t in trade_list:
+        mid = live_prices.get(t.market_id)
+        live_pnl = None
+        if mid is not None and t.status == "OPEN":
+            if t.side == "BUY_YES":
+                live_pnl = round((mid - t.fill_price) * t.simulated_size, 2)
+            else:
+                live_pnl = round(((1.0 - mid) - t.fill_price) * t.simulated_size, 2)
+        trades_with_pnl.append({"trade": t, "live_pnl": live_pnl})
+
+    return templates.TemplateResponse("trades.html", {"request": request, "trades": trades_with_pnl})
+
+
+@router.get("/analysis", response_class=HTMLResponse)
+async def analysis(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    act_count = (await session.execute(select(func.count()).select_from(LagMeasurement))).scalar_one()
+
+    crossed_count = (
+        await session.execute(
+            select(func.count()).select_from(LagMeasurement).where(LagMeasurement.price_lag_status == "CROSSED")
+        )
+    ).scalar_one()
+
+    correct_count = (
+        await session.execute(
+            select(func.count()).select_from(LagMeasurement).where(LagMeasurement.signal_correct == True)  # noqa: E712
+        )
+    ).scalar_one()
+
+    crossed_lags = (
+        await session.execute(
+            select(LagThresholdCrossing.lag_seconds)
+            .join(LagMeasurement, LagThresholdCrossing.lag_measurement_id == LagMeasurement.id)
+            .where(
+                LagThresholdCrossing.threshold_label == "10PT",
+                LagThresholdCrossing.lag_seconds.is_not(None),
+            )
+        )
+    ).scalars().all()
+
+    median_lag = None
+    if crossed_lags:
+        s = sorted(float(x) for x in crossed_lags)
+        mid_i = len(s) // 2
+        raw = s[mid_i] if len(s) % 2 else (s[mid_i - 1] + s[mid_i]) / 2
+        median_lag = format_lag_seconds(raw)
+
+    status_rows = (
+        await session.execute(
+            select(LagMeasurement.price_lag_status, func.count().label("count")).group_by(LagMeasurement.price_lag_status)
+        )
+    ).all()
+    status_counts = [{"status": r[0], "count": r[1]} for r in status_rows]
+
+    return templates.TemplateResponse(
+        "analysis.html",
+        {
+            "request": request,
+            "act_count": act_count,
+            "crossed_count": crossed_count,
+            "correct_count": correct_count,
+            "median_lag": median_lag,
+            "status_counts": status_counts,
+        },
+    )
+
+
+@router.get("/analysis/lags", response_class=HTMLResponse)
+async def lag_analysis(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    lms = (
+        await session.execute(select(LagMeasurement).order_by(desc(LagMeasurement.created_at)).limit(200))
+    ).scalars().all()
+    if not lms:
+        return templates.TemplateResponse("lags.html", {"request": request, "rows": []})
+
+    ids = [lm.id for lm in lms]
+    crossings = (
+        await session.execute(select(LagThresholdCrossing).where(LagThresholdCrossing.lag_measurement_id.in_(ids)))
+    ).scalars().all()
+    drifts = (
+        await session.execute(select(SignalDriftWindow).where(SignalDriftWindow.lag_measurement_id.in_(ids)))
+    ).scalars().all()
+
+    cross_by = {}
+    for c in crossings:
+        cross_by.setdefault(c.lag_measurement_id, {})[c.threshold_label] = c
+
+    drift_by = {}
+    for d in drifts:
+        drift_by.setdefault(d.lag_measurement_id, []).append(d)
+
+    rows = []
+    for lm in lms:
+        c10 = cross_by.get(lm.id, {}).get("10PT")
+        rows.append(
+            {
+                "lm": lm,
+                "lag10": c10.lag_seconds if c10 is not None else None,
+                "crossed10": c10.crossed if c10 is not None else False,
+                "drifts": drift_by.get(lm.id, []),
+            }
+        )
+
+    return templates.TemplateResponse("lags.html", {"request": request, "rows": rows})
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def settings(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    rows = (await session.execute(select(NewsSource).order_by(NewsSource.name))).scalars().all()
+    mappings = (
+        await session.execute(select(ResolutionSourceMapping).order_by(desc(ResolutionSourceMapping.created_at)).limit(200))
+    ).scalars().all()
+    lag_row = await session.get(RuntimeSetting, "lag_focus_top_n")
+    lag_focus = 0
+    if lag_row and (lag_row.value or "").strip().isdigit():
+        lag_focus = int(lag_row.value.strip())
+    profiles = (await session.execute(select(ThresholdProfile).order_by(ThresholdProfile.id))).scalars().all()
+    if not profiles:
+        await ensure_default_threshold_profiles(session)
+        profiles = (await session.execute(select(ThresholdProfile).order_by(ThresholdProfile.id))).scalars().all()
+    tctx = await resolve_trading_thresholds(session)
+    return templates.TemplateResponse(
+        "settings.html",
+        {
+            "request": request,
+            "sources": rows,
+            "mappings": mappings,
+            "lag_focus_top_n": lag_focus,
+            "threshold_profiles": profiles,
+            "active_threshold_profile_id": tctx.profile_id,
+        },
+    )
+
+
+@router.post("/settings/sources/add")
+async def add_source(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    domain = (form.get("domain") or "").strip().lower().removeprefix("www.")
+    rss_url = (form.get("rss_url") or "").strip()
+    source_tier = (form.get("source_tier") or "SOFT").strip()
+    polling_interval_minutes = int(form.get("polling_interval_minutes") or 5)
+    active = (form.get("active") or "on") == "on"
+
+    if name and domain and rss_url:
+        session.add(
+            NewsSource(
+                name=name,
+                domain=domain,
+                rss_url=rss_url,
+                source_tier=source_tier,
+                polling_interval_minutes=polling_interval_minutes,
+                active=active,
+            )
+        )
+        await session.commit()
+
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/settings/runtime/threshold-profile")
+async def save_threshold_profile(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
+    form = await request.form()
+    pid = (form.get("threshold_profile_id") or "").strip()
+    if pid:
+        prof = await session.get(ThresholdProfile, pid)
+        if prof is not None:
+            row = await session.get(RuntimeSetting, RUNTIME_KEY_THRESHOLD_PROFILE)
+            if row is None:
+                session.add(RuntimeSetting(key=RUNTIME_KEY_THRESHOLD_PROFILE, value=pid))
+            else:
+                row.value = pid
+            await session.commit()
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/settings/runtime/lag-focus")
+async def save_lag_focus(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
+    form = await request.form()
+    raw = (form.get("lag_focus_top_n") or "0").strip()
+    try:
+        n = max(0, int(raw))
+    except ValueError:
+        n = 0
+    row = await session.get(RuntimeSetting, "lag_focus_top_n")
+    if row is None:
+        session.add(RuntimeSetting(key="lag_focus_top_n", value=str(n)))
+    else:
+        row.value = str(n)
+    await session.commit()
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.post("/settings/resolution-mappings/add")
+async def add_resolution_mapping(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
+    form = await request.form()
+    market_id = (form.get("market_id") or "").strip() or None
+    source_type = (form.get("source_type") or "SOFT").strip().upper()
+    domain = (form.get("domain") or "").strip().lower().removeprefix("www.") or None
+    url_pattern = (form.get("url_pattern") or "").strip() or None
+    notes = (form.get("notes") or "").strip() or None
+    if source_type not in ("HARD", "SOFT"):
+        source_type = "SOFT"
+    if domain or url_pattern or market_id:
+        session.add(
+            ResolutionSourceMapping(
+                id=new_id("rmap"),
+                market_id=market_id,
+                source_type=source_type,
+                domain=domain,
+                url_pattern=url_pattern,
+                confidence=1.0,
+                notes=notes,
+                active=True,
+            )
+        )
+        await session.commit()
+    return RedirectResponse(url="/settings", status_code=303)
+
+
+@router.get("/analysis/laggy-markets", response_class=HTMLResponse)
+async def laggy_markets_page(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    q = (
+        select(MarketLagScore, Market)
+        .join(Market, Market.id == MarketLagScore.market_id)
+        .order_by(desc(MarketLagScore.combined_score))
+        .limit(200)
+    )
+    rows = (await session.execute(q)).all()
+    lag_row = await session.get(RuntimeSetting, "lag_focus_top_n")
+    lag_focus = 0
+    if lag_row and (lag_row.value or "").strip().isdigit():
+        lag_focus = int(lag_row.value.strip())
+    return templates.TemplateResponse(
+        "laggy_markets.html",
+        {"request": request, "rows": rows, "lag_focus_top_n": lag_focus},
+    )
+
+
+@router.get("/analysis/soft-accuracy", response_class=HTMLResponse)
+async def soft_accuracy_page(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    tier_col = func.coalesce(LagMeasurement.source_tier, literal("UNKNOWN"))
+    stmt = (
+        select(
+            tier_col.label("tier"),
+            func.count().label("n"),
+            func.sum(case((LagMeasurement.signal_correct == True, 1), else_=0)).label("correct"),  # noqa: E712
+            func.sum(case((LagMeasurement.signal_correct == False, 1), else_=0)).label("wrong"),
+        )
+        .where(LagMeasurement.signal_correct.is_not(None))
+        .group_by(tier_col)
+    )
+    raw_rows = (await session.execute(stmt)).all()
+    tiers = []
+    for r in raw_rows:
+        n = int(r.n or 0)
+        c = int(r.correct or 0)
+        w = int(r.wrong or 0)
+        rate = (100.0 * c / (c + w)) if (c + w) > 0 else None
+        tiers.append({"tier": r.tier, "n": n, "correct": c, "wrong": w, "rate": rate})
+    return templates.TemplateResponse("soft_accuracy.html", {"request": request, "tiers": tiers})
+

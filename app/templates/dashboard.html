@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="rounded bg-slate-900 p-4 mb-4" id="system-status-panel">
+    <div class="text-sm font-semibold mb-3">System status</div>
+    <div class="space-y-2 text-sm" id="system-status-rows">
+      {% for row in system_status %}
+        <div class="flex flex-wrap items-start gap-2 border-b border-slate-800 pb-2 last:border-0">
+          <span class="{{ row.dot_class }} w-2 h-2 rounded-full mt-1.5 shrink-0"></span>
+          <div class="flex-1 min-w-0">
+            <div>
+              <span class="font-medium">{{ row.label }}</span>
+              <span class="text-slate-400">{{ row.status }}</span>
+            </div>
+            <div class="text-xs text-slate-500">
+              {{ row.age }} · {{ row.detail }}{% if row.duration != "n/a" %} · last run {{ row.duration }}{% endif %}
+            </div>
+            {% if row.last_error %}<div class="text-xs text-red-400 mt-1">{{ row.last_error }}</div>{% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="flex flex-wrap gap-6 mb-6 text-sm items-center">
+    <div>
+      <span class="text-slate-400">Last price sync</span>
+      <span id="dash-snap-age" class="ml-2 {{ 'text-green-400' if last_snap_age_min < 5 else 'text-amber-400' if last_snap_age_min < 30 else 'text-red-400' }}">
+        {{ last_snap_age_min }}m ago
+      </span>
+    </div>
+    <div>
+      <span class="text-slate-400">Last news poll</span>
+      <span id="dash-news-age" class="ml-2 text-slate-200">{{ last_article_age_min }}m ago</span>
+    </div>
+    <div>
+      <span class="text-slate-400">ACT signals (24h)</span>
+      <span id="dash-act-24h" class="ml-2 text-slate-200">{{ act_24h }}</span>
+    </div>
+    <div>
+      <span class="text-slate-400">Threshold profile</span>
+      <span id="dash-threshold-profile" class="ml-2 text-slate-200" title="{{ threshold_profile_id }}">{{ threshold_profile_label }}</span>
+    </div>
+    {% if dashboard_sse_enabled %}
+    <div class="text-xs text-slate-500">
+      <span id="dash-live-indicator" class="inline-block w-2 h-2 rounded-full bg-green-500 align-middle mr-1"></span>
+      Live updates
+    </div>
+    {% endif %}
+  </div>
+
+  <div id="dash-counts" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
+    {% for k,v in counts.items() %}
+      <div class="rounded bg-slate-900 p-4">
+        <div class="text-xs text-slate-400 uppercase">{{ k }}</div>
+        <div class="text-2xl font-semibold dash-count-val" data-key="{{ k }}">{{ v }}</div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-sm font-semibold mb-3">Recent signals</div>
+    <div class="overflow-auto">
+      <table class="w-full text-sm">
+        <thead class="text-slate-400">
+          <tr>
+            <th class="text-left py-2 pr-3">time</th>
+            <th class="text-left py-2 pr-3">market</th>
+            <th class="text-left py-2 pr-3">outcome</th>
+            <th class="text-left py-2 pr-3">conf</th>
+            <th class="text-left py-2 pr-3">verifier</th>
+            <th class="text-left py-2 pr-3">action</th>
+          </tr>
+        </thead>
+        <tbody id="recent-signals-body">
+          {% if recent_signals %}
+            {% for s in recent_signals %}
+              <tr class="border-t border-slate-800">
+                <td class="py-2 pr-3 whitespace-nowrap">{{ s.created_at }}</td>
+                <td class="py-2 pr-3">{{ s.market_id }}</td>
+                <td class="py-2 pr-3">{{ s.interpreted_outcome }} ({{ s.evidence_type }})</td>
+                <td class="py-2 pr-3">{{ "%.2f"|format(s.confidence) }}</td>
+                <td class="py-2 pr-3">
+                  {% if s.verifier_agrees %}agree{% else %}disagree{% endif %}
+                  ({{ "%.2f"|format(s.verifier_confidence) }})
+                </td>
+                <td class="py-2 pr-3">{{ s.action }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="6" class="py-8 text-center text-slate-500 text-sm">
+                No signals yet — click <strong>Process candidates</strong> to analyse recent news.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      function esc(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+      function renderSystemStatus(rows) {
+        var host = document.getElementById("system-status-rows");
+        if (!host || !rows || !rows.length) return;
+        host.innerHTML = rows
+          .map(function (r) {
+            var err = r.last_error
+              ? '<div class="text-xs text-red-400 mt-1">' + esc(r.last_error) + "</div>"
+              : "";
+            return (
+              '<div class="flex flex-wrap items-start gap-2 border-b border-slate-800 pb-2 last:border-0">' +
+              '<span class="' +
+              esc(r.dot_class) +
+              ' w-2 h-2 rounded-full mt-1.5 shrink-0"></span>' +
+              '<div class="flex-1 min-w-0"><div><span class="font-medium">' +
+              esc(r.label) +
+              '</span> <span class="text-slate-400">' +
+              esc(r.status) +
+              "</span></div>" +
+              '<div class="text-xs text-slate-500">' +
+              esc(r.age) +
+              " · " +
+              esc(r.detail) +
+              (r.duration && r.duration !== "n/a" ? " · last run " + esc(r.duration) : "") +
+              "</div>" +
+              err +
+              "</div></div>"
+            );
+          })
+          .join("");
+      }
+      function pollStatus() {
+        fetch("/api/system-status")
+          .then(function (r) {
+            return r.json();
+          })
+          .then(renderSystemStatus)
+          .catch(function () {});
+      }
+      setInterval(pollStatus, 15000);
+      pollStatus();
+    })();
+  </script>
+
+  {% if dashboard_sse_enabled %}
+  <script>
+    (function () {
+      function snapClass(m) {
+        if (m < 5) return "ml-2 text-green-400";
+        if (m < 30) return "ml-2 text-amber-400";
+        return "ml-2 text-red-400";
+      }
+      function esc(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+      function applySnapshot(d) {
+        var elSnap = document.getElementById("dash-snap-age");
+        var elNews = document.getElementById("dash-news-age");
+        var elAct = document.getElementById("dash-act-24h");
+        var elProf = document.getElementById("dash-threshold-profile");
+        if (elSnap) {
+          elSnap.textContent = d.last_snap_age_min + "m ago";
+          elSnap.className = snapClass(d.last_snap_age_min);
+        }
+        if (elNews) elNews.textContent = d.last_article_age_min + "m ago";
+        if (elAct) elAct.textContent = d.act_24h;
+        if (elProf) {
+          elProf.textContent = d.threshold_profile_label;
+          elProf.setAttribute("title", d.threshold_profile_id || "");
+        }
+        if (d.counts) {
+          document.querySelectorAll(".dash-count-val").forEach(function (node) {
+            var k = node.getAttribute("data-key");
+            if (k && d.counts[k] != null) node.textContent = d.counts[k];
+          });
+        }
+        var tb = document.getElementById("recent-signals-body");
+        if (tb && Array.isArray(d.recent_signals)) {
+          if (!d.recent_signals.length) {
+            tb.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-slate-500 text-sm">No signals yet — click <strong>Process candidates</strong> to analyse recent news.</td></tr>';
+          } else {
+            tb.innerHTML = d.recent_signals.map(function (s) {
+              var v = s.verifier_agrees ? "agree" : "disagree";
+              return (
+                '<tr class="border-t border-slate-800">' +
+                '<td class="py-2 pr-3 whitespace-nowrap">' + esc(s.created_at) + "</td>" +
+                '<td class="py-2 pr-3">' + esc(s.market_id) + "</td>" +
+                '<td class="py-2 pr-3">' + esc(s.interpreted_outcome) + " (" + esc(s.evidence_type || "") + ")</td>" +
+                '<td class="py-2 pr-3">' + esc(Number(s.confidence).toFixed(2)) + "</td>" +
+                '<td class="py-2 pr-3">' + v + " (" + esc(Number(s.verifier_confidence).toFixed(2)) + ")</td>" +
+                '<td class="py-2 pr-3">' + esc(s.action) + "</td>" +
+                "</tr>"
+              );
+            }).join("");
+          }
+        }
+      }
+      var url = "/api/stream/dashboard";
+      var es = new EventSource(url);
+      es.onmessage = function (ev) {
+        try {
+          var d = JSON.parse(ev.data);
+          if (d.error) return;
+          applySnapshot(d);
+        } catch (e) {}
+      };
+      es.onerror = function () {
+        var ind = document.getElementById("dash-live-indicator");
+        if (ind) ind.className = "inline-block w-2 h-2 rounded-full bg-amber-500 align-middle mr-1";
+      };
+    })();
+  </script>
+  {% endif %}
+{% endblock %}

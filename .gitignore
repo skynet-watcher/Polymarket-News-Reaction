@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtualenv
+.venv/
+venv/
+.env/
+.envrc
+
+# Local secrets and data (never commit)
+.env
+.env.*
+!.env.example
+Keys/
+
+# SQLite (local dev)
+*.db
+*.db-shm
+*.db-wal
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Cursor (optional local)
+.cursor/
+
+# Broken git stub backup
+.git.broken.backup/

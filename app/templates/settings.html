@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="rounded bg-slate-900 p-4 mb-4 space-y-3">
+    <div class="text-sm font-semibold">Paper trading threshold profile</div>
+    <p class="text-xs text-slate-400">
+      Controls liquidity/spread gates, relevance matching, LLM confidence floors, article age window, indirect evidence, and paper size multiplier for <em>Process candidates</em>.
+    </p>
+    <form method="post" action="/settings/runtime/threshold-profile" class="flex flex-wrap items-end gap-3 text-sm">
+      <div>
+        <div class="text-slate-400 mb-1">Active profile</div>
+        <select name="threshold_profile_id" class="min-w-[12rem] rounded bg-slate-950 border border-slate-800 px-3 py-2">
+          {% for p in threshold_profiles %}
+            <option value="{{ p.id }}" {% if p.id == active_threshold_profile_id %}selected{% endif %}>{{ p.display_name }} ({{ p.id }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="px-3 py-2 rounded bg-slate-100 text-slate-950 hover:bg-white">Save</button>
+    </form>
+  </div>
+
+  <div class="rounded bg-slate-900 p-4 mb-4 space-y-3">
+    <div class="text-sm font-semibold">Lag focus (paper experiments)</div>
+    <p class="text-xs text-slate-400">
+      When set to <strong>N &gt; 0</strong>, <em>Process candidates</em> only considers the top-N markets by lag rank score.
+      Run <strong>Lag ranks</strong> first. Set to <strong>0</strong> to disable.
+    </p>
+    <form method="post" action="/settings/runtime/lag-focus" class="flex flex-wrap items-end gap-3 text-sm">
+      <div>
+        <div class="text-slate-400 mb-1">Top N laggy markets</div>
+        <input name="lag_focus_top_n" type="number" min="0" value="{{ lag_focus_top_n }}" class="w-32 rounded bg-slate-950 border border-slate-800 px-3 py-2" />
+      </div>
+      <button class="px-3 py-2 rounded bg-slate-100 text-slate-950 hover:bg-white">Save</button>
+    </form>
+  </div>
+
+  <div class="rounded bg-slate-900 p-4 mb-4 space-y-3">
+    <div class="text-sm font-semibold">Default live RSS feeds</div>
+    <p class="text-xs text-slate-400">
+      The app seeds Guardian, BBC (UK + world), NPR, Axios, Politico, and Al Jazeera on startup (see <code class="text-slate-300">app/live_feeds.py</code>).
+      Use this if you removed one or want URLs refreshed without restarting.
+    </p>
+    <form class="js-async-job" method="post" action="/api/jobs/seed_live_feeds" data-job-label="Refresh default feeds" data-done-url="/settings">
+      <button type="submit" class="px-3 py-2 rounded bg-teal-700 hover:bg-teal-600 text-sm">Refresh default feeds</button>
+    </form>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4 mb-4">
+    <div class="rounded bg-slate-900 p-4">
+      <div class="text-sm font-semibold mb-3">Resolution source mapping</div>
+      <p class="text-xs text-slate-400 mb-3">
+        Map domains or URL patterns to <strong>HARD</strong> (official) vs <strong>SOFT</strong> news.
+        Leave market id empty for global hints; set market id to scope to one market.
+      </p>
+      <form method="post" action="/settings/resolution-mappings/add" class="space-y-3 text-sm">
+        <div>
+          <div class="text-slate-400 mb-1">Market id (optional)</div>
+          <input name="market_id" class="w-full rounded bg-slate-950 border border-slate-800 px-3 py-2 font-mono text-xs" placeholder="polymarket market id" />
+        </div>
+        <div>
+          <div class="text-slate-400 mb-1">Type</div>
+          <select name="source_type" class="w-full rounded bg-slate-950 border border-slate-800 px-3 py-2">
+            <option value="SOFT">SOFT</option>
+            <option value="HARD">HARD</option>
+          </select>
+        </div>
+        <div>
+          <div class="text-slate-400 mb-1">Domain (optional)</div>
+          <input name="domain" class="w-full rounded bg-slate-950 border border-slate-800 px-3 py-2" placeholder="ap.org" />
+        </div>
+        <div>
+          <div class="text-slate-400 mb-1">URL pattern (optional)</div>
+          <input name="url_pattern" class="w-full rounded bg-slate-950 border border-slate-800 px-3 py-2" placeholder="*election*" />
+        </div>
+        <div>
+          <div class="text-slate-400 mb-1">Notes</div>
+          <input name="notes" class="w-full rounded bg-slate-950 border border-slate-800 px-3 py-2" />
+        </div>
+        <button class="px-3 py-2 rounded bg-slate-100 text-slate-950 hover:bg-white">Add mapping</button>
+      </form>
+    </div>
+    <div class="rounded bg-slate-900 p-4">
+      <div class="text-sm font-semibold mb-3">Active mappings</div>
+      <div class="overflow-auto max-h-64">
+        <table class="w-full text-xs">
+          <thead class="text-slate-400 text-left">
+            <tr><th class="py-1 pr-2">type</th><th class="py-1 pr-2">market</th><th class="py-1 pr-2">domain</th><th class="py-1">pattern</th></tr>
+          </thead>
+          <tbody>
+            {% for m in mappings %}
+              <tr class="border-t border-slate-800">
+                <td class="py-1 pr-2">{{ m.source_type }}</td>
+                <td class="py-1 pr-2 font-mono">{{ m.market_id or "—" }}</td>
+                <td class="py-1 pr-2">{{ m.domain or "—" }}</td>
+                <td class="py-1">{{ m.url_pattern or "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded bg-slate-900 p-4">
+      <div class="text-sm font-semibold mb-3">Add whitelisted RSS source</div>
+      <form method="post" action="/settings/sources/add" class="space-y-3 text-sm">
+        <div>
+          <div class="text-slate-400 mb-1">Name</div>
+          <input name="name" class="w-full rounded bg-slate-950 border border-slate-800 px-3 py-2" placeholder="Reuters" />
+        </div>
+        <div>
+          <div class="text-slate-400 mb-1">Domain (used for allowlist)</div>
+          <input name="domain" class="w-full rounded bg-slate-950 border border-slate-800 px-3 py-2" placeholder="reuters.com" />
+        </div>
+        <div>
+          <div class="text-slate-400 mb-1">RSS URL</div>
+          <input name="rss_url" class="w-full rounded bg-slate-950 border border-slate-800 px-3 py-2" placeholder="https://example.com/rss" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <div class="text-slate-400 mb-1">Tier</div>
+            <select name="source_tier" class="w-full rounded bg-slate-950 border border-slate-800 px-3 py-2">
+              <option value="SOFT" selected>SOFT — General news, commentary, unofficial</option>
+              <option value="HARD">HARD — Wire services, official statements, primary sources</option>
+              <option value="RESOLUTION_SOURCE">RESOLUTION_SOURCE — Official resolution authority (e.g., AP, government)</option>
+            </select>
+          </div>
+          <div>
+            <div class="text-slate-400 mb-1">Poll (minutes)</div>
+            <input name="polling_interval_minutes" type="number" value="5" class="w-full rounded bg-slate-950 border border-slate-800 px-3 py-2" />
+          </div>
+        </div>
+        <label class="flex items-center gap-2">
+          <input type="checkbox" name="active" checked />
+          <span>Active</span>
+        </label>
+        <button class="px-3 py-2 rounded bg-slate-100 text-slate-950 hover:bg-white">Add source</button>
+      </form>
+    </div>
+
+    <div class="rounded bg-slate-900 p-4">
+      <div class="text-sm font-semibold mb-3">Whitelisted sources</div>
+      <div class="overflow-auto">
+        <table class="w-full text-sm">
+          <thead class="text-slate-400">
+            <tr>
+              <th class="text-left py-2 pr-3">name</th>
+              <th class="text-left py-2 pr-3">domain</th>
+              <th class="text-left py-2 pr-3">tier</th>
+              <th class="text-left py-2 pr-3">rss</th>
+              <th class="text-left py-2 pr-3">active</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in sources %}
+              <tr class="border-t border-slate-800 align-top">
+                <td class="py-2 pr-3">{{ s.name }}</td>
+                <td class="py-2 pr-3">{{ s.domain }}</td>
+                <td class="py-2 pr-3">{{ s.source_tier }}</td>
+                <td class="py-2 pr-3">
+                  <a class="text-sky-400 hover:text-sky-300" href="{{ s.rss_url }}" target="_blank" rel="noreferrer">open</a>
+                </td>
+                <td class="py-2 pr-3">{% if s.active %}yes{% else %}no{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+

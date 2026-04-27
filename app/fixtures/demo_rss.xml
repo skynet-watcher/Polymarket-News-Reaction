@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0">
+  <channel>
+    <title>Demo Wire</title>
+    <link>https://demo-wire.example/rss</link>
+    <description>Demo feed for local MVP</description>
+    <item>
+      <title>Official election authority declares Demo Candidate the winner</title>
+      <link>https://demo-wire.example/politics/demo-candidate-wins</link>
+      <pubDate>Fri, 24 Apr 2026 22:00:00 GMT</pubDate>
+      <description>The Exampleland Election Authority declared Demo Candidate the winner of the mayoral election.</description>
+    </item>
+    <item>
+      <title>Central bank holds rates steady</title>
+      <link>https://demo-wire.example/economy/central-bank-holds</link>
+      <pubDate>Fri, 24 Apr 2026 21:50:00 GMT</pubDate>
+      <description>The Exampleland central bank left rates unchanged at its meeting.</description>
+    </item>
+  </channel>
+</rss>
+

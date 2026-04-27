@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-sm font-semibold mb-3">Markets (latest 200)</div>
+    <div class="overflow-auto">
+      <table class="w-full text-sm">
+        <thead class="text-slate-400">
+          <tr>
+            <th class="text-left py-2 pr-3">id</th>
+            <th class="text-left py-2 pr-3">question</th>
+            <th class="text-left py-2 pr-3">resolution</th>
+            <th class="text-left py-2 pr-3">vol 24h</th>
+            <th class="text-left py-2 pr-3">book</th>
+            <th class="text-left py-2 pr-3">liq</th>
+            <th class="text-left py-2 pr-3">bid</th>
+            <th class="text-left py-2 pr-3">ask</th>
+            <th class="text-left py-2 pr-3">active</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if markets %}
+            {% for m in markets %}
+              <tr class="border-t border-slate-800 align-top">
+                <td class="py-2 pr-3 whitespace-nowrap text-slate-300">{{ m.id }}</td>
+                <td class="py-2 pr-3 min-w-[320px]">{{ m.question }}</td>
+                <td class="py-2 pr-3 max-w-[240px] text-xs text-slate-400 truncate" title="{{ m.resolution_source_text or '' }}">
+                  {{ (m.resolution_source_text or "")[:80] }}{% if m.resolution_source_text and m.resolution_source_text|length > 80 %}…{% endif %}
+                </td>
+                <td class="py-2 pr-3 text-xs">{{ m.volume_24h if m.volume_24h is not none else "" }}</td>
+                <td class="py-2 pr-3">{% if m.enable_orderbook %}yes{% else %}no{% endif %}</td>
+                <td class="py-2 pr-3">{{ m.liquidity or "" }}</td>
+                <td class="py-2 pr-3">{{ m.best_bid_yes or "" }}</td>
+                <td class="py-2 pr-3">{{ m.best_ask_yes or "" }}</td>
+                <td class="py-2 pr-3">{% if m.active and not m.closed %}yes{% else %}no{% endif %}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="9" class="py-8 text-center text-slate-500 text-sm">
+                No markets synced yet — click <strong>Sync markets</strong>.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
+

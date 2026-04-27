@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="rounded bg-slate-900 p-4 space-y-4">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 class="text-lg font-semibold">Laggy markets</h1>
+        <p class="text-sm text-slate-400 max-w-2xl">
+          Ranked by combined z-score of news→price lag (10pt crossings) and news→resolution lag (closure).
+          Higher score suggests slower official / price reaction — useful for focused paper experiments.
+          Set <strong>Lag focus (top N)</strong> in Settings to restrict candidate matching to these markets only.
+        </p>
+        {% if lag_focus_top_n > 0 %}
+          <p class="text-amber-400 text-sm mt-2">Focus mode active: top {{ lag_focus_top_n }} markets only for <strong>Process candidates</strong>.</p>
+        {% endif %}
+      </div>
+      <form class="js-async-job" method="post" action="/api/jobs/compute_lag_ranks" data-job-label="Recompute lag ranks" data-done-url="/analysis/laggy-markets">
+        <button type="submit" class="px-3 py-2 rounded bg-violet-600 hover:bg-violet-500 text-sm">Recompute lag ranks</button>
+      </form>
+    </div>
+    <div class="overflow-auto">
+      <table class="w-full text-sm">
+        <thead class="text-slate-400 text-left">
+          <tr>
+            <th class="py-2 pr-3">market</th>
+            <th class="py-2 pr-3">score</th>
+            <th class="py-2 pr-3">median price lag</th>
+            <th class="py-2 pr-3">median res lag</th>
+            <th class="py-2 pr-3">crossed signals</th>
+            <th class="py-2 pr-3">vol 24h</th>
+            <th class="py-2 pr-3">liquidity</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if rows %}
+            {% for score, m in rows %}
+              <tr class="border-t border-slate-800 align-top">
+                <td class="py-2 pr-3">
+                  <div class="text-slate-300 font-mono text-xs">{{ m.id }}</div>
+                  <div class="max-w-md">{{ m.question[:120] }}{% if m.question|length > 120 %}…{% endif %}</div>
+                </td>
+                <td class="py-2 pr-3 whitespace-nowrap">{{ "%.3f"|format(score.combined_score) }}</td>
+                <td class="py-2 pr-3">{% if score.median_price_lag_seconds is not none %}{{ score.median_price_lag_seconds | format_lag }}{% else %}—{% endif %}</td>
+                <td class="py-2 pr-3">{% if score.median_resolution_lag_seconds is not none %}{{ score.median_resolution_lag_seconds | format_lag }}{% else %}—{% endif %}</td>
+                <td class="py-2 pr-3">{{ score.signal_count }}</td>
+                <td class="py-2 pr-3">{{ m.volume_24h or score.volume_24h or "—" }}</td>
+                <td class="py-2 pr-3">{{ m.liquidity or score.liquidity or "—" }}</td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="7" class="py-8 text-center text-slate-500 text-sm">
+                No lag scores yet — run lag backfill, then <strong>Recompute lag ranks</strong>.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
