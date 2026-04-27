@@ -97,6 +97,26 @@ https://github.com/skynet-watcher/Polymarket-News-Reaction
 
 Local-only files remain ignored/untracked via root `.gitignore`: `.env`, SQLite files (`*.db`, `*.db-shm`, `*.db-wal`), and `Keys/`.
 
+### GitHub access coordination
+
+- Chad/Codex can reach the remote and confirmed `origin/main` exists at commit `962c43f8a7f046ec00767409e9bef92afad8371a`.
+- Repo URL for everyone:
+
+```text
+https://github.com/skynet-watcher/Polymarket-News-Reaction
+```
+
+- Lucy should confirm she can access it from Cursor/Terminal:
+
+```bash
+git clone https://github.com/skynet-watcher/Polymarket-News-Reaction.git
+cd Polymarket-News-Reaction
+git status
+```
+
+- If Lucy needs to push changes, Eric must make sure her GitHub account has write access to `skynet-watcher/Polymarket-News-Reaction` or she should open a pull request from a fork/branch.
+- Local-only runtime files are not in GitHub. Lucy will need her own `.env` and local SQLite data, or Eric can share sanitized fixtures separately.
+
 ---
 
 ## Lucy — backend / thresholds / realtime (this doc replaces `app/README.md`)
