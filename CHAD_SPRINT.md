@@ -4,11 +4,25 @@ Lucy is handing this off: **you own execution**; items below are suggestions, pr
 
 ---
 
+## Solo overnight (no Cursor / no Lucy)
+
+Use this if you are heads-down and only have the repo + terminal.
+
+1. **Repo:** `https://github.com/skynet-watcher/Polymarket-News-Reaction.git` — `git pull` on `main` before you start.
+2. **Env:** `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt` — copy `.env.example` → `.env` and set at least `OPENAI_API_KEY` (optional but recommended for signals).
+3. **Run:** `make run` — listens on `0.0.0.0:8000`. Quick checks: `curl -s http://127.0.0.1:8000/healthz` and open `/` for **System status**.
+4. **If the app misbehaves:** see **Quickstart** + “Next steps” in root `README.md`; threshold tuning in **Settings**; SQLite lock → set `LLM_MAX_CONCURRENCY=1` in `.env` and restart (also in README).
+5. **Before you commit:** `make test` (expect **41** passed). Do **not** commit `.env`, `*.db*`, or `Keys/` (they are gitignored).
+6. **Context on the dashboard / jobs:** `LUCY_STATUS_UI_HANDOFF.md` (behavior + endpoints). **Your backlog** stays in *this* file.
+
+---
+
 ## P0 — Unblock “real repo” and shared truth
 
 1. **Restore a valid git checkout**  
    - Replace or repair `.git` so `git status`, `git pull`, and `git push` work.  
-   - **Done when:** another dev can clone and run `make run` from `main` (or your agreed default branch).
+   - **Done when:** another dev can clone and run `make run` from `main` (or your agreed default branch).  
+   - **Status:** done for `main` at [Polymarket-News-Reaction](https://github.com/skynet-watcher/Polymarket-News-Reaction) — see *Chad — completed* below.
 
 2. **Single “source of truth” for handoff**  
    - Keep `LUCY_STATUS_UI_HANDOFF.md` + this file; delete stale duplicates if any appear.  
@@ -125,7 +139,7 @@ Lucy is handing this off: **you own execution**; items below are suggestions, pr
 
 ## Chad — completed (log)
 
-- **2026-04-27 —** P0 item 1: `.git` repaired, GitHub remote added, GitHub's initial README commit merged, and `main` pushed to `https://github.com/skynet-watcher/Polymarket-News-Reaction`. Local-only paths ignored: `.env`, `*.db*`, `Keys/`.
+- **2026-04-27 —** P0 item 1: `.git` repaired; `origin` → `https://github.com/skynet-watcher/Polymarket-News-Reaction.git`; `main` pushed / tracked. Local-only paths ignored: `.env`, `*.db*`, `Keys/`.
 
 ---
 

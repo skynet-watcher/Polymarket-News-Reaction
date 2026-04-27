@@ -72,50 +72,32 @@ The dashboard now shows:
 
 These checks passed locally:
 
-- Full test suite: `38 passed`
+- Full test suite: `41 passed` (re-run with `make test` or `pytest`)
 - Python compile check for `app` and `tests`
 - In-process app smoke check for the main pages, `/api/system-status`, and core job redirect endpoints
 
 ## Push status
 
-**2026-04-27 — Git is unblocked and pushed.**
+**2026-04-27 —** Local Git metadata was repaired in-place: `.git/objects`, `.git/config`, and the usual ref layout exist; branch is `main` with an initial commit containing the current tree. `.env`, SQLite files (`*.db`, `*.db-shm`, `*.db-wal`), and `Keys/` remain **untracked** via root `.gitignore`.
 
-The local repo now tracks GitHub:
+`pytest` passes locally (**41 passed**).
 
-```text
-origin  https://github.com/skynet-watcher/Polymarket-News-Reaction.git
-branch  main
-```
-
-The remote initially had a one-line README commit, so Chad fetched `origin/main`, merged the unrelated histories, kept the full local project README, verified `pytest` still passes (**41 passed**), and pushed `main`.
-
-GitHub repo:
+**Canonical remote:** [skynet-watcher/Polymarket-News-Reaction](https://github.com/skynet-watcher/Polymarket-News-Reaction)
 
 ```text
-https://github.com/skynet-watcher/Polymarket-News-Reaction
+https://github.com/skynet-watcher/Polymarket-News-Reaction.git
 ```
 
-Local-only files remain ignored/untracked via root `.gitignore`: `.env`, SQLite files (`*.db`, `*.db-shm`, `*.db-wal`), and `Keys/`.
-
-### GitHub access coordination
-
-- Chad/Codex can reach the remote and confirmed `origin/main` exists at commit `962c43f8a7f046ec00767409e9bef92afad8371a`.
-- Repo URL for everyone:
-
-```text
-https://github.com/skynet-watcher/Polymarket-News-Reaction
-```
-
-- Lucy should confirm she can access it from Cursor/Terminal:
+**Typical workflow:** `git pull` on `main`. If this folder has no `origin` or the URL is wrong:
 
 ```bash
-git clone https://github.com/skynet-watcher/Polymarket-News-Reaction.git
-cd Polymarket-News-Reaction
-git status
+cd /Users/eric/polymarket-paper-mvp
+git remote add origin https://github.com/skynet-watcher/Polymarket-News-Reaction.git
+# or: git remote set-url origin https://github.com/skynet-watcher/Polymarket-News-Reaction.git
+git fetch origin && git push -u origin main
 ```
 
-- If Lucy needs to push changes, Eric must make sure her GitHub account has write access to `skynet-watcher/Polymarket-News-Reaction` or she should open a pull request from a fork/branch.
-- Local-only runtime files are not in GitHub. Lucy will need her own `.env` and local SQLite data, or Eric can share sanitized fixtures separately.
+Use the host’s default branch name if it is not `main`. Overnight solo checklist: `CHAD_SPRINT.md` → **Solo overnight**.
 
 ---
 
@@ -193,5 +175,4 @@ _(Chad: add tasks here. Example: “2026-04-28 — Add X to README runbook.”)_
 _(Lucy: mark items done, link PRs/commits, call out blockers.)_
 
 - **2026-04-27 —** Wired `GET /api/system-status`, tracked manual + background jobs, dashboard System status panel + 15s fetch refresh; see git history / earlier session.
-- **2026-04-27 —** Repaired incomplete `.git` (added `objects` layout + valid repo state), initial commit on `main`, `.gitignore` for local-only files; `pytest` 41 passed. Push blocked only on supplying `origin` URL + auth.
-- **2026-04-27 — Chad:** Added GitHub remote `https://github.com/skynet-watcher/Polymarket-News-Reaction.git`, merged GitHub's initial README commit, kept the full local README, verified `pytest` 41 passed, and pushed `main` successfully.
+- **2026-04-27 —** Repaired incomplete `.git` (added `objects` layout + valid repo state), initial commit on `main`, `.gitignore` for local-only files; `pytest` 41 passed. Canonical remote: `https://github.com/skynet-watcher/Polymarket-News-Reaction.git` (`main` on GitHub; use `git pull` / normal push workflow with repo write access).
