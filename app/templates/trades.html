@@ -2,10 +2,33 @@
 {% block content %}
   <p class="text-slate-400 text-sm mb-4 border-l-2 border-slate-600 pl-3">
     Paper trades are simulated only — no real money moves.
-    <strong class="text-slate-200">Fill</strong> = conservative simulated entry price (ask + 1% slippage).
-    <strong class="text-slate-200">Live PnL</strong> = unrealised gain/loss at the current market mid-price.
-    Trades settle automatically at T+24h using a market snapshot.
+    Each new trade targets <strong class="text-slate-200">$10 notional</strong> (scaled by threshold profile multiplier), sized as <code class="text-slate-400">contracts = notional / fill</code>.
+    <strong class="text-slate-200">Entry fee</strong> = taker-style rate × notional; <strong class="text-slate-200">settlement fee</strong> = rate × <em>positive</em> settlement PnL (see <code class="text-slate-400">.env</code> / <code class="text-slate-400">app/paper_economics.py</code>).
+    <strong class="text-slate-200">Live PnL</strong> = mark-to-market gross minus entry fee and a proxy fee on positive MTM.
+    Trades settle automatically at T+24h or on market resolution.
   </p>
+  {% if portfolio %}
+    <div class="rounded bg-slate-900 p-4 mb-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+      <div>
+        <div class="text-xs text-slate-400">Open / settled</div>
+        <div class="text-lg font-semibold">{{ portfolio.open_trades }} / {{ portfolio.settled_trades }}</div>
+      </div>
+      <div>
+        <div class="text-xs text-slate-400">Cash to open (tracked)</div>
+        <div class="text-lg font-semibold">${{ '%.2f'|format(portfolio.sum_cash_spent_usd) }}</div>
+      </div>
+      <div>
+        <div class="text-xs text-slate-400">Fees paid (entry + settlement)</div>
+        <div class="text-lg font-semibold">${{ '%.2f'|format(portfolio.sum_entry_fees_usd + portfolio.sum_settlement_fees_usd) }}</div>
+      </div>
+      <div>
+        <div class="text-xs text-slate-400">Realized net P&amp;L</div>
+        <div class="text-lg font-semibold {{ 'text-green-400' if portfolio.sum_realized_net_pnl_usd >= 0 else 'text-red-400' }}">
+          {{ '%+.2f'|format(portfolio.sum_realized_net_pnl_usd) }}
+        </div>
+      </div>
+    </div>
+  {% endif %}
   <div class="rounded bg-slate-900 p-4">
     <div class="text-sm font-semibold mb-3">Paper trades (latest 200)</div>
     <div class="overflow-auto">
@@ -15,12 +38,14 @@
             <th class="text-left py-2 pr-3">time</th>
             <th class="text-left py-2 pr-3">market</th>
             <th class="text-left py-2 pr-3">side</th>
-            <th class="text-left py-2 pr-3">size</th>
+            <th class="text-left py-2 pr-3">contracts</th>
             <th class="text-left py-2 pr-3">fill</th>
+            <th class="text-left py-2 pr-3">notional</th>
+            <th class="text-left py-2 pr-3">entry fee</th>
             <th class="text-left py-2 pr-3">mid@signal</th>
             <th class="text-left py-2 pr-3">conf</th>
             <th class="text-left py-2 pr-3">status</th>
-            <th class="text-left py-2 pr-3">Live PnL</th>
+            <th class="text-left py-2 pr-3">Live / net PnL</th>
           </tr>
         </thead>
         <tbody>
@@ -33,17 +58,27 @@
                 <td class="py-2 pr-3">{{ t.side }}</td>
                 <td class="py-2 pr-3">{{ "%.2f"|format(t.simulated_size) }}</td>
                 <td class="py-2 pr-3">{{ "%.4f"|format(t.fill_price) }}</td>
+                <td class="py-2 pr-3">
+                  {% if t.notional_usd is not none %}${{ '%.2f'|format(t.notional_usd) }}{% else %}—{% endif %}
+                </td>
+                <td class="py-2 pr-3">
+                  {% if t.entry_fee_usd is not none %}${{ '%.3f'|format(t.entry_fee_usd) }}{% else %}—{% endif %}
+                </td>
                 <td class="py-2 pr-3">{{ t.mid_at_signal or "" }}</td>
                 <td class="py-2 pr-3">{{ "%.2f"|format(t.confidence) }}</td>
                 <td class="py-2 pr-3">{{ t.status }}</td>
                 <td class="py-2 pr-3">
                   {% if row.live_pnl is not none %}
                     <span class="{{ 'text-green-400' if row.live_pnl >= 0 else 'text-red-400' }}">
-                      {{ '%+.2f' % row.live_pnl }}
+                      {{ '%+.2f' % row.live_pnl }} <span class="text-slate-500">(live)</span>
+                    </span>
+                  {% elif t.net_pnl_usd is not none %}
+                    <span class="{{ 'text-green-400' if t.net_pnl_usd >= 0 else 'text-red-400' }}">
+                      {{ '%+.2f' % t.net_pnl_usd }} <span class="text-slate-500">(net)</span>
                     </span>
                   {% elif t.pnl_final is not none %}
                     <span class="{{ 'text-green-400' if t.pnl_final >= 0 else 'text-red-400' }}">
-                      {{ '%+.2f' % t.pnl_final }} (final)
+                      {{ '%+.2f' % t.pnl_final }} <span class="text-slate-500">(final)</span>
                     </span>
                   {% else %}—{% endif %}
                 </td>
@@ -51,7 +86,7 @@
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="9" class="py-8 text-center text-slate-500 text-sm">
+              <td colspan="11" class="py-8 text-center text-slate-500 text-sm">
                 No paper trades yet — signals must pass all quality gates before a trade is simulated.
               </td>
             </tr>

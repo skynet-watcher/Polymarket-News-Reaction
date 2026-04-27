@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     # seconds before the nominal settle time (avoids marking stale pre-news prices as T+24).
     settle_t24_snapshot_max_skew_seconds: int = 7200
 
+    # Paper trade economics (USD). ``app/paper_economics.py`` + ``maybe_paper_trade``.
+    paper_trade_notional_usd: float = 10.0
+    # Simplified Polymarket-style taker fee on notional at entry (e.g. 0.003 = 0.3%).
+    polymarket_entry_fee_rate: float = 0.003
+    # Fee on *positive* settlement PnL (e.g. 0.02 = 2% of winnings — tune to match docs).
+    polymarket_winning_profit_fee_rate: float = 0.02
+
     # Live trading — disabled until execution module is implemented (paper only for MVP).
     trading_enabled: bool = False
 

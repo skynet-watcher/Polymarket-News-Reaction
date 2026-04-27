@@ -36,9 +36,14 @@ async def init_db(engine: AsyncEngine) -> None:
         await _ensure_column(
             conn, table="paper_trades", column="execution_context_json", ddl="ALTER TABLE paper_trades ADD COLUMN execution_context_json JSON"
         )
+        await _ensure_column(conn, table="paper_trades", column="notional_usd", ddl="ALTER TABLE paper_trades ADD COLUMN notional_usd FLOAT")
+        await _ensure_column(conn, table="paper_trades", column="entry_fee_usd", ddl="ALTER TABLE paper_trades ADD COLUMN entry_fee_usd FLOAT")
         await _ensure_column(
-            conn, table="job_statuses", column="last_duration_ms", ddl="ALTER TABLE job_statuses ADD COLUMN last_duration_ms INTEGER"
+            conn, table="paper_trades", column="settlement_fee_usd", ddl="ALTER TABLE paper_trades ADD COLUMN settlement_fee_usd FLOAT"
         )
+        await _ensure_column(conn, table="paper_trades", column="cash_spent_usd", ddl="ALTER TABLE paper_trades ADD COLUMN cash_spent_usd FLOAT")
+        await _ensure_column(conn, table="paper_trades", column="gross_pnl_usd", ddl="ALTER TABLE paper_trades ADD COLUMN gross_pnl_usd FLOAT")
+        await _ensure_column(conn, table="paper_trades", column="net_pnl_usd", ddl="ALTER TABLE paper_trades ADD COLUMN net_pnl_usd FLOAT")
 
         # SQLite cannot alter column nullability; if the lag_threshold_crossings.threshold_value
         # column was created as NOT NULL in an older run, rebuild the table once.
@@ -107,3 +112,4 @@ async def _sqlite_rebuild_lag_threshold_crossings_if_needed(conn) -> None:
         await conn.execute(text("ALTER TABLE lag_threshold_crossings_new RENAME TO lag_threshold_crossings"))
     except Exception:
         return
+

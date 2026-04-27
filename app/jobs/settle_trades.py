@@ -7,8 +7,26 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Market, NewsArticle, NewsSignal, PaperTrade, PriceSnapshot
+from app.paper_economics import net_pnl_after_fees, settlement_fee_on_gross_profit
 from app.settings import settings
 from app.util import now_utc
+
+
+def _apply_settlement_pnl(trade: PaperTrade, *, gross_pnl_usd: float) -> None:
+    """Persist gross/net PnL; legacy trades (no ``notional_usd``) keep fee-free gross in pnl_final."""
+    gross = float(gross_pnl_usd)
+    if trade.notional_usd is None:
+        trade.pnl_final = round(gross, 4)
+        trade.pnl_current = round(gross, 4)
+        return
+    entry_f = float(trade.entry_fee_usd or 0.0)
+    settle_f = settlement_fee_on_gross_profit(gross, settings.polymarket_winning_profit_fee_rate)
+    net = net_pnl_after_fees(gross, entry_f, settle_f)
+    trade.gross_pnl_usd = round(gross, 4)
+    trade.settlement_fee_usd = settle_f
+    trade.net_pnl_usd = net
+    trade.pnl_final = net
+    trade.pnl_current = net
 
 
 async def run(session: AsyncSession) -> dict[str, Any]:
@@ -61,8 +79,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             else:  # BUY_NO
                 resolution_price = 1.0 if market.winning_outcome == "NO" else 0.0
             pnl = (resolution_price - trade.fill_price) * trade.simulated_size
-            trade.pnl_final = round(pnl, 4)
-            trade.pnl_current = round(pnl, 4)
+            _apply_settlement_pnl(trade, gross_pnl_usd=pnl)
             trade.status = "SETTLED_RESOLVED"
             settled += 1
             continue
@@ -99,8 +116,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             settle_no = 1.0 - settle_mid
             pnl = (settle_no - trade.fill_price) * trade.simulated_size
 
-        trade.pnl_final = round(pnl, 4)
-        trade.pnl_current = round(pnl, 4)
+        _apply_settlement_pnl(trade, gross_pnl_usd=pnl)
         trade.status = "SETTLED_T24H"
         settled += 1
 

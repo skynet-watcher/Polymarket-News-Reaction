@@ -319,8 +319,9 @@ def test_maybe_paper_trade_prefers_snapshot_bid_ask_over_stale_market():
     assert trade.best_bid_at_signal == 0.40
     assert trade.best_ask_at_signal == 0.42
     assert trade.fill_price == pytest.approx(min(0.999, 0.42 + 0.01))
-    # size uses snapshot liquidity 8000 → min(100, max(10, 8000/500)) = min(100, 16) = 16
-    assert trade.simulated_size == pytest.approx(16.0)
+    assert trade.notional_usd == pytest.approx(10.0)
+    assert trade.simulated_size == pytest.approx(10.0 / trade.fill_price)
+    assert trade.entry_fee_usd == pytest.approx(0.03)
 
 
 def test_maybe_paper_trade_buy_no_uses_snapshot_bid():
@@ -359,3 +360,5 @@ def test_maybe_paper_trade_buy_no_uses_snapshot_bid():
     assert trade.side == "BUY_NO"
     # fill = min(0.999, (1 - 0.60) + 0.01) = 0.41
     assert trade.fill_price == pytest.approx(0.41)
+    assert trade.notional_usd == pytest.approx(10.0)
+    assert trade.simulated_size == pytest.approx(10.0 / 0.41)

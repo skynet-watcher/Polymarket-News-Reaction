@@ -244,6 +244,14 @@ class PaperTrade(Base):
     pnl_current: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     pnl_final: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # USD economics (see ``app/paper_economics.py``). Legacy rows may have NULLs here.
+    notional_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    entry_fee_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    settlement_fee_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cash_spent_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    gross_pnl_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    net_pnl_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     # Paper execution audit: ladder summary, partial fill, rejection codes, book depth snapshot.
     execution_context_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
@@ -460,3 +468,4 @@ class AuditLog(Base):
     signal_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     payload_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
+

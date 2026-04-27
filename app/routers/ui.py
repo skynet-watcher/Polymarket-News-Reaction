@@ -27,6 +27,7 @@ from app.models import (
     SignalDriftWindow,
     ThresholdProfile,
 )
+from app.paper_economics import aggregate_portfolio, live_net_mark_usd
 from app.settings import settings as app_settings
 from app.threshold_context import RUNTIME_KEY_THRESHOLD_PROFILE, resolve_trading_thresholds
 from app.threshold_profiles_seed import ensure_default_threshold_profiles
@@ -95,18 +96,32 @@ async def trades(request: Request, session: AsyncSession = Depends(get_session))
         if snap is not None and snap.mid_yes is not None:
             live_prices[mid] = float(snap.mid_yes)
 
+    portfolio = await aggregate_portfolio(session)
+
     trades_with_pnl = []
     for t in trade_list:
         mid = live_prices.get(t.market_id)
         live_pnl = None
         if mid is not None and t.status == "OPEN":
-            if t.side == "BUY_YES":
+            if t.notional_usd is not None:
+                live_pnl = live_net_mark_usd(
+                    side=t.side,
+                    fill_price=float(t.fill_price),
+                    contracts=float(t.simulated_size),
+                    yes_mid=float(mid),
+                    entry_fee_usd=float(t.entry_fee_usd or 0.0),
+                    winning_profit_fee_rate=float(app_settings.polymarket_winning_profit_fee_rate),
+                )
+            elif t.side == "BUY_YES":
                 live_pnl = round((mid - t.fill_price) * t.simulated_size, 2)
             else:
                 live_pnl = round(((1.0 - mid) - t.fill_price) * t.simulated_size, 2)
         trades_with_pnl.append({"trade": t, "live_pnl": live_pnl})
 
-    return templates.TemplateResponse("trades.html", {"request": request, "trades": trades_with_pnl})
+    return templates.TemplateResponse(
+        "trades.html",
+        {"request": request, "trades": trades_with_pnl, "portfolio": portfolio},
+    )
 
 
 @router.get("/analysis", response_class=HTMLResponse)

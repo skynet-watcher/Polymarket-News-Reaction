@@ -91,6 +91,9 @@ That **caps** RSS poll (≤120s), candidate processing (≤60s), full Gamma snap
 
 | Variable | Meaning |
 |----------|---------|
+| `PAPER_TRADE_NOTIONAL_USD` | Target **$** notional per simulated trade (default **10**). |
+| `POLYMARKET_ENTRY_FEE_RATE` | Taker-style fee on that notional at open (default **0.003** = 0.3%). |
+| `POLYMARKET_WINNING_PROFIT_FEE_RATE` | Fee on **positive** settlement PnL (default **0.02** = 2%). |
 | `DATABASE_URL` | Default `sqlite+aiosqlite:///./data.db` (project dir). |
 | `OPENAI_API_KEY` | Optional but required for interpret/verify; without it, candidates stall at LLM steps. |
 | `REALTIME_PAPER_QUICKSTART` | `1` = faster cadence (see above). |
