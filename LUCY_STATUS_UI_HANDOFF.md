@@ -72,7 +72,7 @@ The dashboard now shows:
 
 These checks passed locally:
 
-- Full test suite: `41 passed` (re-run with `make test` or `pytest`)
+- Full test suite: `44+ passed` (re-run with `make test` or `pytest`)
 - Python compile check for `app` and `tests`
 - In-process app smoke check for the main pages, `/api/system-status`, and core job redirect endpoints
 
@@ -80,7 +80,7 @@ These checks passed locally:
 
 **2026-04-27 —** Local Git metadata was repaired in-place: `.git/objects`, `.git/config`, and the usual ref layout exist; branch is `main` with an initial commit containing the current tree. `.env`, SQLite files (`*.db`, `*.db-shm`, `*.db-wal`), and `Keys/` remain **untracked** via root `.gitignore`.
 
-`pytest` passes locally (**41 passed**).
+`pytest` passes locally (see `make test`; **44+** as of 2026-04-28 sprint).
 
 **Canonical remote:** [skynet-watcher/Polymarket-News-Reaction](https://github.com/skynet-watcher/Polymarket-News-Reaction)
 
@@ -176,3 +176,4 @@ _(Lucy: mark items done, link PRs/commits, call out blockers.)_
 
 - **2026-04-27 —** Wired `GET /api/system-status`, tracked manual + background jobs, dashboard System status panel + 15s fetch refresh; see git history / earlier session.
 - **2026-04-27 —** Repaired incomplete `.git` (added `objects` layout + valid repo state), initial commit on `main`, `.gitignore` for local-only files; `pytest` 41 passed. Canonical remote: `https://github.com/skynet-watcher/Polymarket-News-Reaction.git` (`main` on GitHub; use `git pull` / normal push workflow with repo write access).
+- **2026-04-28 —** Realtime paper sprint: `REALTIME_PAPER_QUICKSTART` / `make run-realtime`, README soak + runbook, async lag backfill, export summary API, snapshot heartbeat, System status duration + links.

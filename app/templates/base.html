@@ -23,7 +23,14 @@
           <form class="js-async-job" method="post" action="/api/jobs/process_candidates" data-job-label="Process candidates" data-done-url="/signals">
             <button type="submit" class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm">Process candidates</button>
           </form>
-          <form class="js-async-job" method="post" action="/api/lag-measurements/backfill" data-job-label="Backfill lags" data-done-url="/analysis/lags">
+          <form
+            class="js-async-job"
+            method="post"
+            action="/api/lag-measurements/backfill"
+            data-job-label="Backfill lags"
+            data-done-url="/analysis/lags"
+            data-async-background="true"
+          >
             <button type="submit" class="px-3 py-2 rounded bg-fuchsia-600 hover:bg-fuchsia-500 text-sm">Backfill lags</button>
           </form>
           <form class="js-async-job" method="post" action="/api/jobs/compute_signal_metrics" data-job-label="Signal metrics" data-done-url="/analysis">
@@ -39,7 +46,7 @@
       </div>
 
       <p class="text-xs text-slate-500 mb-4 max-w-4xl leading-relaxed">
-        <strong class="text-slate-400">Automation:</strong> by default the server also runs <strong>Poll news</strong> every <code class="text-slate-400">background_poll_news_interval_seconds</code> (600s), <strong>Process candidates</strong> every <code class="text-slate-400">background_process_candidates_interval_seconds</code> (540s), and the lag pipeline every <code class="text-slate-400">background_lag_pipeline_interval_seconds</code> (3600s). Set any interval to <code class="text-slate-400">0</code> in <code class="text-slate-400">.env</code> to disable that loop. Market price sync still runs every <code class="text-slate-400">snapshot_interval_seconds</code>; settle trades every <code class="text-slate-400">background_settle_interval_seconds</code>.
+        <strong class="text-slate-400">Automation:</strong> background intervals come from <code class="text-slate-400">.env</code> / <code class="text-slate-400">app/settings.py</code> (defaults: news poll 600s, candidates 540s, lag pipeline hourly). Set any to <code class="text-slate-400">0</code> to disable that loop. Use <code class="text-slate-400">REALTIME_PAPER_QUICKSTART=1</code> for faster overnight paper (see README). Market sync uses <code class="text-slate-400">snapshot_interval_seconds</code>; settlement uses <code class="text-slate-400">background_settle_interval_seconds</code>.
       </p>
 
       <div
@@ -90,6 +97,7 @@
             e.preventDefault();
             var label = form.getAttribute("data-job-label") || "Job";
             var doneUrl = form.getAttribute("data-done-url");
+            var asyncBg = form.getAttribute("data-async-background") === "true";
             showToast(label + "… running (please wait)", false);
 
             fetch(form.action, {
@@ -119,8 +127,12 @@
                   showToast(label + " failed — " + detail, true);
                   return;
                 }
-                var summary = formatPayload(res.data);
-                showToast(label + " complete — " + (summary || "ok"), false);
+                if (asyncBg && res.data && res.data.accepted) {
+                  showToast(label + " started — running in background (check System status)", false);
+                } else {
+                  var summary = formatPayload(res.data);
+                  showToast(label + " complete — " + (summary || "ok"), false);
+                }
                 if (doneUrl) {
                   setTimeout(function () {
                     window.location.href = doneUrl;
@@ -136,3 +148,4 @@
     </script>
   </body>
 </html>
+

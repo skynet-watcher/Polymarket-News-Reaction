@@ -19,6 +19,7 @@ from app.models import (
     PriceSnapshot,
     SignalMetrics,
 )
+from app.settings import settings
 from app.util import format_duration_ms, format_elapsed_since, now_utc, to_utc_aware
 
 
@@ -31,6 +32,27 @@ JOB_LABELS: dict[str, str] = {
     "lag_backfill": "Lag backfill",
     "signal_metrics": "Signal metrics",
     "lag_ranks": "Lag ranks",
+}
+
+JOB_LINKS: dict[str, str] = {
+    "sync_markets": "/markets",
+    "poll_news": "/news",
+    "process_candidates": "/signals",
+    "paper_trades": "/trades",
+    "lag_backfill": "/analysis/lags",
+    "signal_metrics": "/analysis",
+    "lag_ranks": "/analysis/laggy-markets",
+    "settle_trades": "/trades",
+}
+
+JOB_ACTIONS: dict[str, str] = {
+    "sync_markets": "/api/jobs/sync_markets",
+    "poll_news": "/api/jobs/poll_news",
+    "process_candidates": "/api/jobs/process_candidates",
+    "lag_backfill": "/api/lag-measurements/backfill",
+    "signal_metrics": "/api/jobs/compute_signal_metrics",
+    "lag_ranks": "/api/jobs/compute_lag_ranks",
+    "settle_trades": "/api/jobs/settle_trades",
 }
 
 
@@ -209,8 +231,30 @@ def _status_row(
     }
 
 
+def _slow_suffix(job_name: str, job: Optional[JobStatus]) -> str:
+    if job is None or job.last_duration_ms is None:
+        return ""
+    ms = job.last_duration_ms
+    if job_name in ("lag_backfill", "process_candidates") and ms >= 300_000:
+        return " · slow run"
+    return ""
+
+
+def _with_actions(row: dict[str, Any]) -> dict[str, Any]:
+    key = str(row["key"])
+    href = JOB_LINKS.get(key, "/")
+    action_url = JOB_ACTIONS.get(key)
+    row["href"] = href
+    row["done_url"] = href
+    row["action_url"] = action_url
+    row["action_label"] = "Retry" if row.get("status") == "Failed" else "Run"
+    row["action_enabled"] = bool(action_url and row.get("status") != "Running")
+    return row
+
+
 async def build_system_status(session: AsyncSession) -> list[dict[str, Any]]:
     now = now_utc()
+    paper_fresh_s = 2 * 60 * 60 if settings.realtime_paper_quickstart else 24 * 60 * 60
     job_rows = (await session.execute(select(JobStatus))).scalars().all()
     jobs = {j.job_name: j for j in job_rows}
 
@@ -279,7 +323,7 @@ async def build_system_status(session: AsyncSession) -> list[dict[str, Any]]:
             job=jobs.get("process_candidates"),
             data_updated_at=last_signal,
             freshness_seconds=15 * 60,
-            detail=f"{counts['signals']} signals",
+            detail=f"{counts['signals']} signals{_slow_suffix('process_candidates', jobs.get('process_candidates'))}",
             now=now,
         ),
         _status_row(
@@ -287,7 +331,7 @@ async def build_system_status(session: AsyncSession) -> list[dict[str, Any]]:
             label="Paper trades",
             job=None,
             data_updated_at=last_trade,
-            freshness_seconds=24 * 60 * 60,
+            freshness_seconds=paper_fresh_s,
             detail=f"{counts['trades']} trades",
             now=now,
         ),
@@ -297,7 +341,7 @@ async def build_system_status(session: AsyncSession) -> list[dict[str, Any]]:
             job=jobs.get("lag_backfill"),
             data_updated_at=last_lag,
             freshness_seconds=24 * 60 * 60,
-            detail=f"{counts['lags']} measurements",
+            detail=f"{counts['lags']} measurements{_slow_suffix('lag_backfill', jobs.get('lag_backfill'))}",
             now=now,
         ),
         _status_row(
@@ -329,4 +373,4 @@ async def build_system_status(session: AsyncSession) -> list[dict[str, Any]]:
             now=now,
         ),
     ]
-    return rows
+    return [_with_actions(row) for row in rows]

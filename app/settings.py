@@ -1,5 +1,7 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
+
+from pydantic import model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -55,6 +57,13 @@ class Settings(BaseSettings):
     realtime_process_min_seconds: int = 15
     realtime_snapshot_min_seconds: int = 10
 
+    # When true, cap background + snapshot intervals toward faster news → signals → paper (more API/LLM).
+    # See README "Realtime paper (overnight)".
+    realtime_paper_quickstart: bool = False
+
+    # Log a snapshot-loop heartbeat every N successful ticks (0 = off). Uses INFO.
+    snapshot_loop_log_every_n_ticks: int = 20
+
     # LLM candidate processing (parallel workers, each with own DB session). Lower = fewer tokens in flight.
     llm_max_concurrency: int = 2
     llm_call_timeout_seconds: float = 75.0
@@ -87,6 +96,18 @@ class Settings(BaseSettings):
     lag_weight_price: float = 0.8
     lag_weight_closure: float = 0.2
     lag_min_sample_size_for_zscore: int = 10
+
+    @model_validator(mode="after")
+    def apply_realtime_paper_quickstart(self):
+        if not self.realtime_paper_quickstart:
+            return self
+        self.background_poll_news_interval_seconds = min(self.background_poll_news_interval_seconds, 120)
+        self.background_process_candidates_interval_seconds = min(self.background_process_candidates_interval_seconds, 60)
+        self.snapshot_interval_seconds = min(self.snapshot_interval_seconds, 60)
+        self.realtime_poll_min_seconds = min(self.realtime_poll_min_seconds, 25)
+        self.realtime_process_min_seconds = min(self.realtime_process_min_seconds, 12)
+        self.realtime_snapshot_min_seconds = min(self.realtime_snapshot_min_seconds, 8)
+        return self
 
 
 settings = Settings()

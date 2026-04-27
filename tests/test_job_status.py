@@ -95,8 +95,14 @@ def test_build_system_status_marks_running_and_live_data() -> None:
                 rows = await build_system_status(session)
                 by_key = {r["key"]: r for r in rows}
                 assert by_key["sync_markets"]["color"] == "green"
+                assert by_key["sync_markets"]["href"] == "/markets"
+                assert by_key["sync_markets"]["action_url"] == "/api/jobs/sync_markets"
+                assert by_key["sync_markets"]["action_enabled"] is True
                 assert by_key["process_candidates"]["color"] == "yellow"
                 assert by_key["process_candidates"]["duration"].endswith("elapsed")
+                assert by_key["process_candidates"]["action_enabled"] is False
+                assert by_key["paper_trades"]["href"] == "/trades"
+                assert by_key["paper_trades"]["action_url"] is None
                 assert by_key["lag_ranks"]["color"] == "red"
         finally:
             await engine.dispose()

@@ -71,12 +71,81 @@ make run
 
 Watch **System status** on `/` and use **Settings → threshold profile** if you want more ACTs (e.g. `balanced` / `aggressive`).
 
+### Realtime paper (overnight / hands-off)
+
+For **faster** news → candidate → paper cycles without hand-tuning every env var, use either:
+
+```bash
+make run-realtime
+```
+
+or in `.env`:
+
+```bash
+REALTIME_PAPER_QUICKSTART=1
+```
+
+That **caps** RSS poll (≤120s), candidate processing (≤60s), full Gamma snapshot (≤60s), and tightens adaptive floors when you hold **open** paper near resolution (`app/realtime_policy.py`). It uses more Polymarket + OpenAI quota than the defaults.
+
+### Environment reference
+
+| Variable | Meaning |
+|----------|---------|
+| `DATABASE_URL` | Default `sqlite+aiosqlite:///./data.db` (project dir). |
+| `OPENAI_API_KEY` | Optional but required for interpret/verify; without it, candidates stall at LLM steps. |
+| `REALTIME_PAPER_QUICKSTART` | `1` = faster cadence (see above). |
+| `BACKGROUND_*_INTERVAL_SECONDS` | `0` disables that background loop; see `.env.example`. |
+| `LLM_MAX_CONCURRENCY` | Parallel candidate workers; set `1` if you see `database is locked`. |
+| `TRADING_ENABLED` | Must stay `false` for this MVP (paper only). |
+| `DASHBOARD_SSE_ENABLED` | Live dashboard counts via `/api/stream/dashboard`. |
+
+Copy `.env.example` → `.env` and edit; never commit `.env` (gitignored).
+
+### SQLite backup / restore
+
+The app uses a single file DB when `DATABASE_URL` points at `.../data.db`. To snapshot while stopped:
+
+```bash
+cp data.db "backup-$(date +%Y%m%d%H%M).db"
+```
+
+Restore: stop the app, replace `data.db`, start again.
+
+### First hour checklist
+
+1. `make run` or `make run-realtime`.
+2. `curl -s http://127.0.0.1:8000/healthz`
+3. Open `/` — confirm **System status** rows appear; use top nav **Sync markets** / **Poll news** once if all red on a cold DB.
+4. Within one news + candidate cycle, **articles** and **signals** counts should move; **paper trades** only after an `ACT` + gates pass.
+5. Optional: `curl -s http://127.0.0.1:8000/api/export/summary` for a JSON paste of counts + job freshness.
+
+### Long soak (4–24h) protocol
+
+- **Watch:** `/` System status (green/yellow/red), disk use for `data.db*`, terminal logs.
+- **Expect:** hourly lag pipeline + settlement ticks; first lag rows may stay red until enough signals exist.
+- **Restart if:** runaway memory (rare); unrecoverable HTTP failures; or SQLite lock storms after lowering `LLM_MAX_CONCURRENCY`.
+- **Known incident (SQLite):** under parallel LLM + single-writer SQLite, you may see `database is locked`. Mitigation: `LLM_MAX_CONCURRENCY=1`, restart, and avoid firing multiple heavy jobs manually at once.
+
+### Reverse proxy + SSE
+
+For `/api/stream/dashboard`, disable response buffering and allow long-lived connections, e.g. **nginx:**
+
+```nginx
+location /api/stream/dashboard {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+}
+```
+
 ### Next steps to go “live” on one machine
 
 1. **Use a stable working tree** — `git clone https://github.com/skynet-watcher/Polymarket-News-Reaction.git` (or `git pull` if you already have it) so `main` matches the team remote.
 2. **Create `.env`** with at least `OPENAI_API_KEY` (you already have one) and optionally `DATABASE_URL` if you don’t want `./data.db` in the project directory.
 3. **Start once with `make run`** — confirm `http://127.0.0.1:8000/healthz` returns `{"ok":"true"}`.
-4. **Open `/`** — within **~10–15 minutes** you should see news polling and candidate processing advance in **System status** (green/yellow/red). If everything is red with no data, click **Sync markets** / **Poll news** once from Settings or POST the job URLs (see Jobs below).
+4. **Open `/`** — within **~10–15 minutes** (or **~2–5 minutes** with `REALTIME_PAPER_QUICKSTART=1` / `make run-realtime`) you should see news polling and candidate processing advance in **System status** (green/yellow/red). If everything is red with no data, click **Sync markets** / **Poll news** once from the header or POST the job URLs (see Jobs below).
 5. **Leave it running** — over **1–3 hours**, expect new **articles**, **signals**, and occasional **paper trades** if the LLM + gates pass (use a looser threshold profile to see more activity).
 6. **Lag / ranks** — first hourly lag pipeline run may still show red until backfill produces rows; that’s normal on a fresh DB.
 7. **If SQLite locks** — set `LLM_MAX_CONCURRENCY=1` in the environment and restart.
@@ -90,7 +159,8 @@ Watch **System status** on `/` and use **Settings → threshold profile** if you
 - `POST /api/jobs/poll_news`
 - `POST /api/jobs/process_candidates`
 - `POST /api/jobs/settle_trades`
-- `POST /api/lag-measurements/backfill`
+- `POST /api/lag-measurements/backfill` (returns immediately; job runs in the **background** — watch System status)
+- `GET /api/export/summary` — JSON snapshot (counts + system status rows) for logs or chat paste
 
 All jobs are designed to be **idempotent**.
 

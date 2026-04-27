@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Monotonic anchor for full Gamma sync vs CLOB-only refresh (see _snapshot_once).
 _snapshot_last_full: list[float] = [0.0]
+_snapshot_loop_tick: list[int] = [0]
 
 
 async def _snapshot_once(session: AsyncSession) -> dict[str, Any]:
@@ -96,6 +97,15 @@ async def _startup() -> None:
                     session_factory=SessionLocal,
                 )
                 sleep_s = float(result.get("sleep_s", sleep_s))
+                _snapshot_loop_tick[0] += 1
+                n = settings.snapshot_loop_log_every_n_ticks
+                if n > 0 and _snapshot_loop_tick[0] % n == 0:
+                    logger.info(
+                        "snapshot_loop heartbeat tick=%s next_sleep_s=%.1f full_sync_age_s=%.1f",
+                        _snapshot_loop_tick[0],
+                        sleep_s,
+                        time.monotonic() - _snapshot_last_full[0],
+                    )
             except Exception:
                 logger.exception("background snapshot loop failed")
             await asyncio.sleep(sleep_s)

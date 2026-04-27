@@ -15,8 +15,15 @@
           Eventual-move lags are retrospective research metrics only.
         </div>
       </div>
-      <form method="post" action="/api/lag-measurements/backfill">
-        <button class="px-3 py-2 rounded bg-fuchsia-600 hover:bg-fuchsia-500 text-sm">Recompute / backfill</button>
+      <form
+        class="js-async-job"
+        method="post"
+        action="/api/lag-measurements/backfill"
+        data-job-label="Lag backfill"
+        data-done-url="/analysis/lags"
+        data-async-background="true"
+      >
+        <button type="submit" class="px-3 py-2 rounded bg-fuchsia-600 hover:bg-fuchsia-500 text-sm">Recompute / backfill</button>
       </form>
     </div>
 

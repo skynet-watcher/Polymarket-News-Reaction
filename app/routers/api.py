@@ -5,16 +5,17 @@ import datetime as dt
 import json
 from typing import Optional, Union
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dashboard_data import get_dashboard_snapshot
 from app.db import SessionLocal, get_session
 from app.job_status import build_system_status, run_tracked_job
+from app.settings import settings
+from app.util import now_utc
 from app.jobs import compute_lag, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
 from app.live_feeds import ensure_live_news_sources
-from app.settings import settings
 from sqlalchemy import desc, select
 
 from app.models import LagMeasurement, LagThresholdCrossing, SignalDriftWindow
@@ -99,9 +100,41 @@ async def job_settle_trades(request: Request, session: AsyncSession = Depends(ge
 
 
 @router.post("/lag-measurements/backfill", response_model=None)
-async def backfill_lag_measurements(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
-    out = await run_tracked_job(session, "lag_backfill", lambda: compute_lag.run_backfill(session))
-    return _job_response(request, out, "/analysis/lags")
+async def backfill_lag_measurements(
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> Union[JSONResponse, RedirectResponse]:
+    """Queue lag backfill in a background task so the browser request returns immediately."""
+
+    async def _run_lag_backfill() -> None:
+        async with SessionLocal() as session:
+            await run_tracked_job(session, "lag_backfill", lambda: compute_lag.run_backfill(session))
+
+    background_tasks.add_task(_run_lag_backfill)
+    return _job_response(
+        request,
+        {
+            "ok": True,
+            "accepted": True,
+            "job": "lag_backfill",
+            "message": "Lag backfill started in the background; watch System status for progress.",
+        },
+        "/analysis/lags",
+    )
+
+
+@router.get("/export/summary")
+async def export_summary(session: AsyncSession = Depends(get_session)) -> dict[str, object]:
+    """JSON snapshot for operators: dashboard counts + system status rows (paste into notes)."""
+    snap = await get_dashboard_snapshot(session)
+    rows = await build_system_status(session)
+    return {
+        "ok": True,
+        "generated_at": now_utc().isoformat(),
+        "realtime_paper_quickstart": settings.realtime_paper_quickstart,
+        "dashboard": snap,
+        "system_status": rows,
+    }
 
 
 @router.post("/jobs/compute_signal_metrics", response_model=None)

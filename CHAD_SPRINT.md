@@ -10,9 +10,9 @@ Use this if you are heads-down and only have the repo + terminal.
 
 1. **Repo:** `https://github.com/skynet-watcher/Polymarket-News-Reaction.git` — `git pull` on `main` before you start.
 2. **Env:** `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt` — copy `.env.example` → `.env` and set at least `OPENAI_API_KEY` (optional but recommended for signals).
-3. **Run:** `make run` — listens on `0.0.0.0:8000`. Quick checks: `curl -s http://127.0.0.1:8000/healthz` and open `/` for **System status**.
+3. **Run:** `make run` (token-light defaults) or `make run-realtime` (faster paper cadence) — listens on `0.0.0.0:8000`. Quick checks: `curl -s http://127.0.0.1:8000/healthz` and open `/` for **System status**; optional `curl -s http://127.0.0.1:8000/api/export/summary`.
 4. **If the app misbehaves:** see **Quickstart** + “Next steps” in root `README.md`; threshold tuning in **Settings**; SQLite lock → set `LLM_MAX_CONCURRENCY=1` in `.env` and restart (also in README).
-5. **Before you commit:** `make test` (expect **41** passed). Do **not** commit `.env`, `*.db*`, or `Keys/` (they are gitignored).
+5. **Before you commit:** `make test` (expect **44+** passed). Do **not** commit `.env`, `*.db*`, or `Keys/` (they are gitignored).
 6. **Context on the dashboard / jobs:** `LUCY_STATUS_UI_HANDOFF.md` (behavior + endpoints). **Your backlog** stays in *this* file.
 
 ---
@@ -52,8 +52,7 @@ Use this if you are heads-down and only have the repo + terminal.
 ## P1 — UX / UI polish
 
 7. **Lag backfill: don’t block the browser**  
-   - Today a long `POST /api/lag-measurements/backfill` ties to the HTTP request; cancelling the tab causes noisy SQLAlchemy teardown (mitigated in `get_session`, but UX still bad).  
-   - Options: `BackgroundTasks` + poll, or `202 Accepted` + job id + status endpoint, or CLI script for heavy backfills.  
+   - **Status:** `POST /api/lag-measurements/backfill` now queues work via FastAPI `BackgroundTasks` and returns immediately; use System status to watch `lag_backfill`.  
    - **Done when:** user never has to keep a tab open for 10+ minutes for a routine backfill.
 
 8. **System status: link to drill-down**  
@@ -140,6 +139,7 @@ Use this if you are heads-down and only have the repo + terminal.
 ## Chad — completed (log)
 
 - **2026-04-27 —** P0 item 1: `.git` repaired; `origin` → `https://github.com/skynet-watcher/Polymarket-News-Reaction.git`; `main` pushed / tracked. Local-only paths ignored: `.env`, `*.db*`, `Keys/`.
+- **2026-04-28 —** Hands-off **realtime paper**: `REALTIME_PAPER_QUICKSTART` + `make run-realtime`, README runbook/soak/SSE/proxy, snapshot loop heartbeat, async lag backfill (P1 #7), `GET /api/export/summary`, System status shows last job duration + row links, dashboard JS parity.
 
 ---
 
