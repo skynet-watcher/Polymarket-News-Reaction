@@ -78,19 +78,24 @@ These checks passed locally:
 
 ## Push status
 
-**2026-04-27 —** Local Git metadata was repaired in-place: `.git/objects`, `.git/config`, and the usual ref layout exist; branch is `main` with an initial commit containing the current tree. `.env`, SQLite files (`*.db`, `*.db-shm`, `*.db-wal`), and `Keys/` remain **untracked** via root `.gitignore`.
+**2026-04-27 — Git is unblocked and pushed.**
 
-`pytest` passes locally (**41 passed**).
+The local repo now tracks GitHub:
 
-**Still required for shared remote:** the canonical repository URL is not recorded in this project. Add it and push when you have it:
-
-```bash
-cd /Users/eric/polymarket-paper-mvp
-git remote add origin <YOUR_GIT_URL>
-git push -u origin main
+```text
+origin  https://github.com/skynet-watcher/Polymarket-News-Reaction.git
+branch  main
 ```
 
-If `origin` already exists elsewhere, use `git remote set-url origin <url>` instead. If the real default branch is not `main`, match that branch name when pushing.
+The remote initially had a one-line README commit, so Chad fetched `origin/main`, merged the unrelated histories, kept the full local project README, verified `pytest` still passes (**41 passed**), and pushed `main`.
+
+GitHub repo:
+
+```text
+https://github.com/skynet-watcher/Polymarket-News-Reaction
+```
+
+Local-only files remain ignored/untracked via root `.gitignore`: `.env`, SQLite files (`*.db`, `*.db-shm`, `*.db-wal`), and `Keys/`.
 
 ---
 
@@ -169,3 +174,4 @@ _(Lucy: mark items done, link PRs/commits, call out blockers.)_
 
 - **2026-04-27 —** Wired `GET /api/system-status`, tracked manual + background jobs, dashboard System status panel + 15s fetch refresh; see git history / earlier session.
 - **2026-04-27 —** Repaired incomplete `.git` (added `objects` layout + valid repo state), initial commit on `main`, `.gitignore` for local-only files; `pytest` 41 passed. Push blocked only on supplying `origin` URL + auth.
+- **2026-04-27 — Chad:** Added GitHub remote `https://github.com/skynet-watcher/Polymarket-News-Reaction.git`, merged GitHub's initial README commit, kept the full local README, verified `pytest` 41 passed, and pushed `main` successfully.

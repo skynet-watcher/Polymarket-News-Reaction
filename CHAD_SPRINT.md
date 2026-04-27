@@ -125,7 +125,7 @@ Lucy is handing this off: **you own execution**; items below are suggestions, pr
 
 ## Chad — completed (log)
 
-- **2026-04-27 —** P0 item 1 (this machine): `.git` repaired and initial commit on `main`; `git status` / commit work. Add `git remote add origin <url>` and push when the canonical remote is known. Local-only paths ignored: `.env`, `*.db*`, `Keys/`.
+- **2026-04-27 —** P0 item 1: `.git` repaired, GitHub remote added, GitHub's initial README commit merged, and `main` pushed to `https://github.com/skynet-watcher/Polymarket-News-Reaction`. Local-only paths ignored: `.env`, `*.db*`, `Keys/`.
 
 ---
 
