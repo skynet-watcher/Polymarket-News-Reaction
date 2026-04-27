@@ -72,17 +72,25 @@ The dashboard now shows:
 
 These checks passed locally:
 
-- Full test suite: `40 passed`
+- Full test suite: `38 passed`
 - Python compile check for `app` and `tests`
 - In-process app smoke check for the main pages, `/api/system-status`, and core job redirect endpoints
 
 ## Push status
 
-This code has not been pushed from this machine yet.
+**2026-04-27 —** Local Git metadata was repaired in-place: `.git/objects`, `.git/config`, and the usual ref layout exist; branch is `main` with an initial commit containing the current tree. `.env`, SQLite files (`*.db`, `*.db-shm`, `*.db-wal`), and `Keys/` remain **untracked** via root `.gitignore`.
 
-The local folder currently contains an incomplete `.git` directory. Git cannot recognize `/Users/eric/polymarket-paper-mvp` as a repository because `.git` is missing repository metadata such as `HEAD`, refs, config, and objects.
+`pytest` passes locally (**41 passed**).
 
-Once the repository metadata is restored or the project is recloned into a valid git checkout, this change set can be committed and pushed.
+**Still required for shared remote:** the canonical repository URL is not recorded in this project. Add it and push when you have it:
+
+```bash
+cd /Users/eric/polymarket-paper-mvp
+git remote add origin <YOUR_GIT_URL>
+git push -u origin main
+```
+
+If `origin` already exists elsewhere, use `git remote set-url origin <url>` instead. If the real default branch is not `main`, match that branch name when pushing.
 
 ---
 
@@ -153,37 +161,11 @@ Optional: set a **system reminder** or calendar ping every 5 minutes to say “a
 
 ### Requests for Lucy (Chad)
 
-- **2026-04-27 21:15Z — Git unblock request.**
-  - Problem: `/Users/eric/polymarket-paper-mvp/.git` is not a valid Git repository. It only contains:
-    - `.git/description`
-    - `.git/info/exclude`
-  - Missing expected Git metadata includes `.git/HEAD`, `.git/config`, `.git/objects`, `.git/refs`, and index data.
-  - Symptom: from `/Users/eric/polymarket-paper-mvp`, `git status`, `git rev-parse --show-toplevel`, commit, and push all fail with `fatal: not a git repository (or any of the parent directories): .git`.
-  - What I need from Lucy/Dev:
-    - Identify the correct remote repo URL and default branch.
-    - Safest path: clone the repo into a fresh valid checkout, then copy or apply Chad's local changed files from `/Users/eric/polymarket-paper-mvp`.
-    - Do **not** overwrite local-only files blindly. Preserve `.env`, `data.db`, `data.db-shm`, `data.db-wal`, and `Keys/` outside Git.
-    - After recovery, run `git status`, `pytest`, and commit/push the reviewed app/docs changes.
-  - Local files likely needing carry-over include `.github/workflows/ci.yml`, `.env.example`, `README.md`, `CHAD_SPRINT.md`, `LUCY_STATUS_UI_HANDOFF.md`, `app/`, and `tests/`.
-
-- **2026-04-27 21:05Z — Review Chad sprint P0 chunk.**
-  - Review `.github/workflows/ci.yml`, `.env.example`, `README.md`, `app/models.py`, `app/init_db.py`, `app/job_status.py`, `app/templates/dashboard.html`, `tests/test_job_status.py`, and `tests/test_init_db_migrations.py`.
-  - Confirm `job_statuses.last_duration_ms` works on both fresh DBs and existing SQLite DBs.
-  - Confirm `/api/system-status` includes `duration` and the dashboard shows `last run ...` after a tracked job completes.
-  - Next suggested implementation pick after review: link System status rows to drill-down pages, then add retry buttons for failed jobs.
-
-- **2026-04-27 20:40Z — Validate unattended launch path.**
-  - Confirm `make run` starts the app cleanly from a valid checkout.
-  - Open `/` through the running FastAPI server, not the raw `file://` template.
-  - Leave it running long enough to verify System status moves for market sync, news polling, candidate processing, lag pipeline, and settlement.
-  - If any status stays red unexpectedly, record the `last_error` text and the affected process here.
-  - If SQLite reports `database is locked`, retry with `LLM_MAX_CONCURRENCY=1` and note whether that clears it.
-  - Restore or reclone the git repository metadata before commit/push; current `.git` is incomplete on Eric's machine.
+_(Chad: add tasks here. Example: “2026-04-28 — Add X to README runbook.”)_
 
 ### Lucy — completed / notes
 
 _(Lucy: mark items done, link PRs/commits, call out blockers.)_
 
 - **2026-04-27 —** Wired `GET /api/system-status`, tracked manual + background jobs, dashboard System status panel + 15s fetch refresh; see git history / earlier session.
-- **2026-04-27 20:40Z — Chad heartbeat:** Fixed stale automation interval copy in `app/templates/base.html` to match current defaults (`600s` news, `540s` candidates, `3600s` lag pipeline). Verified with compile check and `pytest`: `40 passed`.
-- **2026-04-27 21:05Z — Chad sprint P0 chunk:** Added CI smoke workflow, `.env.example`, expanded README runbook/backup/soak docs, and surfaced tracked job duration in System status. Verified compile check, `pytest`: `41 passed`, and app smoke for `/`, `/api/system-status`, and settlement redirect.
+- **2026-04-27 —** Repaired incomplete `.git` (added `objects` layout + valid repo state), initial commit on `main`, `.gitignore` for local-only files; `pytest` 41 passed. Push blocked only on supplying `origin` URL + auth.

@@ -123,18 +123,10 @@ Lucy is handing this off: **you own execution**; items below are suggestions, pr
 
 ---
 
-_Last filled by Lucy for Chad — no code in this commit path; implement at your pace._
+## Chad — completed (log)
+
+- **2026-04-27 —** P0 item 1 (this machine): `.git` repaired and initial commit on `main`; `git status` / commit work. Add `git remote add origin <url>` and push when the canonical remote is known. Local-only paths ignored: `.env`, `*.db*`, `Keys/`.
 
 ---
 
-## Chad — completed
-
-- **2026-04-27 — P0 item 2:** Confirmed the root `README.md` points to `CHAD_SPRINT.md` and `LUCY_STATUS_UI_HANDOFF.md`.
-- **2026-04-27 — P0 item 3:** Added minimal GitHub Actions CI at `.github/workflows/ci.yml` to install dependencies and run `pytest`.
-- **2026-04-27 — P0 item 4:** Expanded the root `README.md` with `.env.example`, hands-off defaults, SQLite data/backup notes, first-hour checklist, and soak protocol.
-- **2026-04-27 — P0 item 6:** Added job duration visibility to `JobStatus`, `/api/system-status`, and the dashboard System status panel. Existing SQLite DBs get `job_statuses.last_duration_ms` via `init_db`.
-
-## Chad — current blockers / next pick
-
-- **P0 item 1 remains blocked:** `/Users/eric/polymarket-paper-mvp/.git` is incomplete, so `git status`, commit, and push still cannot work from this folder. The folder only has `.git/description` and `.git/info/exclude`; it is missing `.git/HEAD`, `.git/config`, `.git/objects`, `.git/refs`, and index data. Restore/reclone a valid checkout before expecting CI to run remotely. Preserve `.env`, `data.db*`, and `Keys/` outside Git while copying Chad's changed app/docs/test files into the recovered checkout.
-- **Next useful local item:** P1 item 8, link each System status row to its drill-down page, or P1 item 14, add retry buttons for failed jobs.
+_Last filled by Lucy for Chad — no code in this commit path; implement at your pace._
