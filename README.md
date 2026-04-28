@@ -2,6 +2,88 @@
 
 Sprint tasks for Chad: see [`CHAD_SPRINT.md`](CHAD_SPRINT.md) (includes a **solo overnight** checklist). Status UI / Lucy notes: [`LUCY_STATUS_UI_HANDOFF.md`](LUCY_STATUS_UI_HANDOFF.md). Source repo: [github.com/skynet-watcher/Polymarket-News-Reaction](https://github.com/skynet-watcher/Polymarket-News-Reaction).
 
+---
+
+## Engineering Log
+
+> Maintained by **Alex** (reviewer/architect). Most recent entry first.
+> Chad and Lucy: read this before starting new work — it covers bugs fixed, architectural decisions, and things that look wrong but aren't.
+
+---
+
+### 2026-04-28 — Critical: real markets never got price snapshots (`token_ids_json` was always null)
+
+**Symptom:** Dashboard showed "last price sync" as hours ago even after a successful `sync_markets` run. Only the `smoke_mkt` fixture market ever had `PriceSnapshot` rows.
+
+**Root cause:** The Gamma `/events` endpoint (used as the primary market fetch) does **not** return `tokenIds`. Without a token ID, the CLOB bid/ask fetch is skipped and no `PriceSnapshot` is written. All 11k+ real markets landed in the DB with `token_ids_json = null` on every sync.
+
+**Fix (`app/jobs/sync_markets.py` — commit `8e53418`):** `_fetch_all_markets_unified` now always runs **both** the `/events` path (volume-sorted, richer metadata) **and** the `/markets` path (provides `tokenIds`). Results are merged: `/events` seeds the list, `/markets` patches in `tokenIds` and fills other gaps. The fixture fallback still fires when **both** primary paths fail (403/5xx).
+
+**What this means for you:**
+- First sync after this fix will populate `token_ids_json` for all markets that have it.
+- CLOB price fetches and snapshots will start working for real markets.
+- If you have an old `data.db`, trigger **Sync markets** once manually and watch snapshots tick up.
+
+---
+
+### 2026-04-28 — Backtest: trade marking and signal_action added
+
+**Context:** Chad built the `backtest_news_reactions` job. Review identified two gaps.
+
+**Gaps fixed (commit `c3577ec`):**
+
+1. **`PaperTrade.trade_source`** (`LIVE` | `BACKTEST`, default `LIVE`) — every trade now carries its origin. All existing rows default to `LIVE`. Backtest-simulated trades are tagged `BACKTEST` and carry a `backtest_case_id` FK back to the `BacktestCase` that generated them.
+
+2. **`BacktestCase.signal_action`** — records what the live pipeline actually did for this signal (`ACT` / `ABSTAIN` / `CANDIDATE` / `REJECT_*`). Without this field there was no way to separate "trades we made" from "opportunities we missed" in the backtest UI.
+
+3. **Trade simulation logic** — for signals where the live pipeline did **not** ACT, the backtest now simulates a `BACKTEST`-tagged `PaperTrade` using `p0` as the historical fill price (`mode: "backtest_top_of_book"` in `execution_context_json`). For ACT signals, a `LIVE_TRADE_EXISTS` audit event is emitted instead of duplicating the trade.
+
+**What this means for you:**
+- The trades UI should filter/badge by `trade_source` so BACKTEST trades are visually distinct.
+- Settlement (`settle_trades`) will settle BACKTEST trades normally — that's intentional; they need to mark-to-market just like live ones.
+- Chad: if you add UI for trades, add a `[BACKTEST]` badge when `trade_source == "BACKTEST"`.
+
+---
+
+### 2026-04-28 — Near-resolution market sweep added to sync
+
+**Problem:** Markets resolving within 24–48h tend to have thin liquidity and rank low in volume-sorted fetches. They're often the highest-velocity trading opportunities but were invisible to both the matcher and the backtester.
+
+**Fix (`app/jobs/sync_markets.py` — same commit as tokenIds fix):** `_fetch_near_resolution_markets()` queries Gamma for up to 50 markets with `end_date` within the next 48 hours, regardless of liquidity rank. These are unioned into the main market list on every sync. Failures in this sweep are swallowed silently (it's additive — the main sync still completes).
+
+---
+
+### 2026-04-28 — Two-stage news→market matching pipeline
+
+**Problem:** The original keyword matcher used a single `min_relevance = 0.75` threshold on raw token overlap. Almost nothing reached the LLM because the RSS body is only ~50–150 words and Polymarket question language is abstract. The system was producing near-zero signals.
+
+**Fix (`app/core/matcher.py`, `app/core/interpret.py`, `app/jobs/process_candidates.py` — commit `4614b0b`):**
+
+Stage 1 — keyword pre-filter (permissive, `MATCHER_KEYWORD_MIN_RELEVANCE = 0.15`):
+- Article **title words weighted 3×** body words.
+- **Entity alias expansion**: `fed` → `federal reserve`, `btc` → `bitcoin`, `potus` → `president`, etc. (30+ aliases in `ENTITY_ALIASES`).
+- **Stop-word filter**: removes `will`, `would`, `said`, `the`, `for`, etc. — boilerplate noise that inflated false matches.
+- Hard gate: zero token overlap → skip without any LLM call.
+
+Stage 2 — `batch_relevance_screen()` in `interpret.py`:
+- Single `gpt-4o-mini` call per batch of 8 markets: "score each 0–1 for relevance to this article."
+- Only markets scoring ≥ `MATCHER_LLM_MIN_RELEVANCE = 0.50` create `NewsSignal` rows and proceed to interpret+verify.
+- Degrades gracefully (pass-through) when no API key is set.
+
+**Tuning knobs** (all in `.env`):
+
+| Variable | Default | Notes |
+|---|---|---|
+| `MATCHER_KEYWORD_MIN_RELEVANCE` | `0.15` | Pre-filter floor — lower = more LLM calls |
+| `MATCHER_KEYWORD_MAX_CANDIDATES` | `30` | Cap per article before LLM screen |
+| `MATCHER_MARKET_LIMIT` | `100` | Markets loaded per run |
+| `MATCHER_LLM_BATCH_SIZE` | `8` | Markets per relevance-screen call |
+| `MATCHER_LLM_MIN_RELEVANCE` | `0.50` | Minimum LLM score to promote to interpret+verify |
+
+**Also:** `_openai_interpret` prompt now includes `rules_text`, `resolution_source_text`, and `end_date` where non-null — gives the LLM full resolution context, not just the question.
+
+---
+
 This is a **paper-trading only** research MVP that:
 
 - Syncs active Polymarket markets (public endpoints only)
@@ -16,6 +98,27 @@ This is a **paper-trading only** research MVP that:
 - **No real trading**: no wallets, no keys, no authenticated endpoints.
 - **Whitelisted sources only**: everything else is rejected.
 - **Act only on high confidence**: interpreter + verifier gates; otherwise abstain.
+
+---
+
+## Open items for Chad
+
+> Alex: these are ready to pick up — no blockers, no design decisions needed.
+
+### 1. UI — badge BACKTEST trades on the trades page
+The `PaperTrade.trade_source` field is now `LIVE` or `BACKTEST`. The trades list in the UI should show a muted `[BACKTEST]` badge next to any row where `trade_source == "BACKTEST"` so they're visually distinct from live paper trades. The `backtest_case_id` FK is also there if you want to link directly to the relevant backtest case.
+
+### 2. UI — `/analysis/backtests` run selector
+The backtests page always shows the **latest** run. The `runs` list is already fetched and passed to the template but not used for navigation. Add a simple dropdown or list on the left so users can click any past run and see its cases. No backend changes needed — just template work.
+
+### 3. Backtest: add `signal_action` filter to the cases table
+The `BacktestCase.signal_action` field (`ACT` / `ABSTAIN` / `CANDIDATE` / `REJECT_*`) is now populated. On the backtests page, add a filter row or column so users can isolate "missed opportunities" (non-ACT cases) vs "trades we made" (ACT cases). This is the core research view.
+
+### 4. Check Gamma `end_date_min` / `end_date_max` param names
+The near-resolution market sweep (`_fetch_near_resolution_markets` in `sync_markets.py`) passes `end_date_min` and `end_date_max` to the Gamma `/markets` endpoint. These are guesses at the param names — confirm they're correct by checking a live response or the Gamma API docs. If they're wrong, the sweep silently returns nothing (it catches errors). Fix the param names if needed.
+
+### 5. CHAD_SPRINT.md — mark completed items
+Several items in `CHAD_SPRINT.md` are done but not marked. Do a pass and check off what's shipped.
 
 ---
 
