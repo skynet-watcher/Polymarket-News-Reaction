@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% set overall_bg   = "bg-green-900 border-green-600"  if overall == "green"
+                 else "bg-amber-900 border-amber-600"   if overall == "amber"
+                 else "bg-red-900   border-red-600" %}
+{% set overall_text = "text-green-300"  if overall == "green"
+                 else "text-amber-300"  if overall == "amber"
+                 else "text-red-300" %}
+{% set overall_label = "All systems go" if overall == "green"
+                  else "Needs attention" if overall == "amber"
+                  else "Action required" %}
+
+{# ── Overall banner ─────────────────────────────────────────────────── #}
+<div class="rounded border {{ overall_bg }} px-6 py-5 mb-8 flex items-center gap-4">
+  <div class="text-4xl leading-none">
+    {% if overall == "green" %}✅{% elif overall == "amber" %}⚠️{% else %}🚨{% endif %}
+  </div>
+  <div>
+    <div class="text-lg font-bold {{ overall_text }}">{{ overall_label }}</div>
+    <div class="text-sm text-slate-300 mt-0.5">{{ overall_message }}</div>
+  </div>
+  <div class="ml-auto text-right text-xs text-slate-500">
+    <div>Refreshes in <span id="countdown">60</span>s</div>
+    <div class="mt-1">Last news check: <span class="text-slate-300">{{ last_news_check }}</span></div>
+    <div>Last price sync: <span class="text-slate-300">{{ last_price_sync }}</span></div>
+  </div>
+</div>
+
+{# ── Three gates ─────────────────────────────────────────────────────── #}
+<div class="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">
+  Three things that must be working before results are trustworthy
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
+  {% for gate in gates %}
+    {% set card_border = "border-green-700" if gate.status == "green"
+                    else "border-amber-600" if gate.status == "amber"
+                    else "border-red-700" %}
+    {% set dot_color   = "bg-green-400"    if gate.status == "green"
+                    else "bg-amber-400"    if gate.status == "amber"
+                    else "bg-red-500" %}
+    {% set status_label = "Good"           if gate.status == "green"
+                     else "In progress"   if gate.status == "amber"
+                     else "Not ready" %}
+    {% set status_text  = "text-green-400" if gate.status == "green"
+                     else "text-amber-400" if gate.status == "amber"
+                     else "text-red-400" %}
+
+    <div class="rounded bg-slate-900 border {{ card_border }} p-5 flex flex-col gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 font-bold text-sm shrink-0">
+          {{ gate.number }}
+        </div>
+        <div class="flex-1">
+          <div class="font-semibold text-slate-100 text-sm">{{ gate.title }}</div>
+          <div class="text-xs text-slate-500">{{ gate.question }}</div>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <span class="w-2 h-2 rounded-full {{ dot_color }}"></span>
+          <span class="text-xs font-medium {{ status_text }}">{{ status_label }}</span>
+        </div>
+      </div>
+
+      <div class="text-sm text-slate-300 leading-relaxed">{{ gate.message }}</div>
+
+      {% if gate.fix %}
+        <div class="rounded bg-slate-800 border border-slate-700 px-3 py-2 text-xs text-amber-300 leading-relaxed">
+          <span class="font-semibold">What to do:</span> {{ gate.fix }}
+        </div>
+      {% endif %}
+    </div>
+  {% endfor %}
+</div>
+
+{# ── Stats grid ──────────────────────────────────────────────────────── #}
+<div class="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">Research scorecard</div>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-xs text-slate-500 mb-1">Total paper trades</div>
+    <div class="text-2xl font-semibold text-slate-100">{{ stats.total_trades }}</div>
+    <div class="text-xs text-slate-500 mt-1">{{ stats.open_trades }} currently open</div>
+  </div>
+
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-xs text-slate-500 mb-1">Resolved trades</div>
+    <div class="text-2xl font-semibold text-slate-100">{{ stats.resolved_trades }}</div>
+    <div class="text-xs text-slate-500 mt-1">
+      {% if stats.resolved_trades > 0 %}
+        {{ stats.win_count }} won, {{ stats.resolved_trades - stats.win_count }} lost
+      {% else %}
+        None settled yet
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-xs text-slate-500 mb-1">Win rate</div>
+    <div class="text-2xl font-semibold
+      {% if stats.win_rate is not none %}
+        {% if stats.win_rate >= 55 %}text-green-400{% elif stats.win_rate >= 45 %}text-amber-400{% else %}text-red-400{% endif %}
+      {% else %}text-slate-500{% endif %}">
+      {% if stats.win_rate is not none %}{{ stats.win_rate }}%{% else %}—{% endif %}
+    </div>
+    <div class="text-xs text-slate-500 mt-1">
+      {% if stats.win_rate is not none %}
+        {% if stats.win_rate >= 55 %}Above coin-flip — signal may have edge{% elif stats.win_rate >= 45 %}Near coin-flip — more data needed{% else %}Below coin-flip — review signal settings{% endif %}
+      {% else %}
+        Needs resolved trades to calculate
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-xs text-slate-500 mb-1">Net profit / loss</div>
+    <div class="text-2xl font-semibold
+      {% if stats.net_pnl is not none %}
+        {% if stats.net_pnl > 0 %}text-green-400{% elif stats.net_pnl < 0 %}text-red-400{% else %}text-slate-300{% endif %}
+      {% else %}text-slate-500{% endif %}">
+      {% if stats.net_pnl is not none %}
+        {% if stats.net_pnl >= 0 %}+${{ "%.2f"|format(stats.net_pnl) }}{% else %}-${{ "%.2f"|format(stats.net_pnl | abs) }}{% endif %}
+      {% else %}—{% endif %}
+    </div>
+    <div class="text-xs text-slate-500 mt-1">On resolved trades only</div>
+  </div>
+
+</div>
+
+{# ── System info ─────────────────────────────────────────────────────── #}
+<div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-xs text-slate-500 mb-1">Trading profile</div>
+    <div class="text-sm font-semibold text-slate-100">{{ stats.threshold_profile }}</div>
+    <div class="text-xs text-slate-500 mt-1">
+      <a href="/settings" class="text-indigo-400 hover:underline">Change in Settings →</a>
+    </div>
+  </div>
+
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-xs text-slate-500 mb-1">Active markets loaded</div>
+    <div class="text-2xl font-semibold text-slate-100">{{ stats.active_markets }}</div>
+    <div class="text-xs text-slate-500 mt-1">
+      <a href="/markets" class="text-indigo-400 hover:underline">View all markets →</a>
+    </div>
+  </div>
+
+  <div class="rounded bg-slate-900 p-4">
+    <div class="text-xs text-slate-500 mb-1">Quick links</div>
+    <div class="flex flex-col gap-1 mt-1">
+      <a href="/trades" class="text-xs text-indigo-400 hover:underline">View all trades →</a>
+      <a href="/signals" class="text-xs text-indigo-400 hover:underline">View all signals →</a>
+      <a href="/analysis/backtests" class="text-xs text-indigo-400 hover:underline">View backtests →</a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  (function () {
+    var secs = 60;
+    var el = document.getElementById("countdown");
+    var iv = setInterval(function () {
+      secs -= 1;
+      if (el) el.textContent = secs;
+      if (secs <= 0) {
+        clearInterval(iv);
+        window.location.reload();
+      }
+    }, 1000);
+  })();
+</script>
+
+{% endblock %}

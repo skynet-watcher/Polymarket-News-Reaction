@@ -477,6 +477,193 @@ async def laggy_markets_page(request: Request, session: AsyncSession = Depends(g
     )
 
 
+@router.get("/health", response_class=HTMLResponse)
+async def health_check(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    now = now_utc()
+
+    # Gate 1: Real price data flowing (exclude the smoke_mkt demo fixture)
+    real_snap_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(PriceSnapshot)
+            .join(Market, Market.id == PriceSnapshot.market_id)
+            .where(Market.id != "smoke_mkt")
+        )
+    ).scalar_one() or 0
+
+    real_market_count = (
+        await session.execute(
+            select(func.count(func.distinct(PriceSnapshot.market_id)))
+            .select_from(PriceSnapshot)
+            .join(Market, Market.id == PriceSnapshot.market_id)
+            .where(Market.id != "smoke_mkt")
+        )
+    ).scalar_one() or 0
+
+    if real_snap_count >= 10:
+        gate1_status = "green"
+        gate1_message = f"Live prices are being tracked across {real_market_count} real markets."
+        gate1_fix = None
+    elif real_snap_count > 0:
+        gate1_status = "amber"
+        gate1_message = f"Some price data is flowing ({real_market_count} markets) — still building up."
+        gate1_fix = "Ask Chad to run a market sync and check that new snapshots are appearing."
+    else:
+        gate1_status = "red"
+        gate1_message = "No live market prices yet — the system can't evaluate trades without this."
+        gate1_fix = "Ask Chad: the token ID fix needs to be verified. Run 'Sync markets' from the dashboard."
+
+    # Gate 2: Real trade settlement (SETTLED_RESOLVED = actual win/loss from market outcome)
+    resolved_count = (
+        await session.execute(
+            select(func.count()).select_from(PaperTrade).where(PaperTrade.status == "SETTLED_RESOLVED")
+        )
+    ).scalar_one() or 0
+
+    t24h_count = (
+        await session.execute(
+            select(func.count()).select_from(PaperTrade).where(PaperTrade.status == "SETTLED_T24H")
+        )
+    ).scalar_one() or 0
+
+    if resolved_count > 0:
+        gate2_status = "green"
+        gate2_message = f"{resolved_count} trade(s) have been settled with real win/loss outcomes."
+        gate2_fix = None
+    elif t24h_count > 0:
+        gate2_status = "amber"
+        gate2_message = (
+            f"{t24h_count} trade(s) settled at a 24-hour price snapshot — "
+            "but we don't yet know if they were real wins or losses."
+        )
+        gate2_fix = "Ask Chad to wire in the resolution system so trades settle when markets officially close."
+    else:
+        gate2_status = "red"
+        gate2_message = "No settled trades yet — profit and loss numbers are not available."
+        gate2_fix = "This will resolve once trades are placed (Gate 3) and markets close. Ask Chad for an update."
+
+    # Gate 3: Live trades firing in the past 7 days
+    week_ago = now - dt.timedelta(days=7)
+    live_7d = (
+        await session.execute(
+            select(func.count())
+            .select_from(PaperTrade)
+            .where(PaperTrade.trade_source == "LIVE")
+            .where(PaperTrade.created_at >= week_ago)
+        )
+    ).scalar_one() or 0
+
+    if live_7d >= 3:
+        gate3_status = "green"
+        gate3_message = f"{live_7d} live paper trades placed in the past 7 days."
+        gate3_fix = None
+    elif live_7d > 0:
+        gate3_status = "amber"
+        gate3_message = f"Only {live_7d} live paper trade(s) in the past 7 days — the system is being very selective."
+        gate3_fix = "Ask Chad to switch to the 'Research' trading profile in Settings — the current profile is too strict."
+    else:
+        gate3_status = "red"
+        gate3_message = "No live paper trades in the past 7 days — the system isn't acting on any news signals."
+        gate3_fix = "Ask Chad to switch to the 'Research' trading profile in Settings."
+
+    statuses = [gate1_status, gate2_status, gate3_status]
+    if "red" in statuses:
+        overall = "red"
+        overall_message = "The system needs attention before results are meaningful."
+    elif "amber" in statuses:
+        overall = "amber"
+        overall_message = "The system is running but a few things need attention."
+    else:
+        overall = "green"
+        overall_message = "Everything looks good — results are trustworthy."
+
+    # Stats
+    total_trades = (await session.execute(select(func.count()).select_from(PaperTrade))).scalar_one() or 0
+    open_trades = (
+        await session.execute(select(func.count()).select_from(PaperTrade).where(PaperTrade.status == "OPEN"))
+    ).scalar_one() or 0
+    win_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(PaperTrade)
+            .where(PaperTrade.status == "SETTLED_RESOLVED")
+            .where(PaperTrade.pnl_final > 0)
+        )
+    ).scalar_one() or 0
+    pnl_usd = (
+        await session.execute(
+            select(func.sum(PaperTrade.net_pnl_usd)).where(PaperTrade.status == "SETTLED_RESOLVED")
+        )
+    ).scalar_one()
+    active_markets = (
+        await session.execute(select(func.count()).select_from(Market).where(Market.active == True))  # noqa: E712
+    ).scalar_one() or 0
+
+    last_article_time = (await session.execute(select(func.max(NewsArticle.fetched_at)))).scalar_one_or_none()
+    last_snap_time = (await session.execute(select(func.max(PriceSnapshot.timestamp)))).scalar_one_or_none()
+
+    tctx = await resolve_trading_thresholds(session)
+
+    def _ago(ts: dt.datetime | None) -> str:
+        if ts is None:
+            return "never"
+        delta = int((now - to_utc_aware(ts)).total_seconds())
+        if delta < 60:
+            return "just now"
+        if delta < 3600:
+            return f"{delta // 60} min ago"
+        if delta < 86400:
+            return f"{delta // 3600} hr ago"
+        return f"{delta // 86400} day(s) ago"
+
+    return templates.TemplateResponse(
+        "health.html",
+        {
+            "request": request,
+            "overall": overall,
+            "overall_message": overall_message,
+            "gates": [
+                {
+                    "number": 1,
+                    "title": "Live Price Data",
+                    "question": "Are we tracking real market prices?",
+                    "status": gate1_status,
+                    "message": gate1_message,
+                    "fix": gate1_fix,
+                },
+                {
+                    "number": 2,
+                    "title": "Real Win / Loss Settlement",
+                    "question": "Do we know if our trades actually won or lost?",
+                    "status": gate2_status,
+                    "message": gate2_message,
+                    "fix": gate2_fix,
+                },
+                {
+                    "number": 3,
+                    "title": "Trades Being Placed",
+                    "question": "Is the system actively paper trading?",
+                    "status": gate3_status,
+                    "message": gate3_message,
+                    "fix": gate3_fix,
+                },
+            ],
+            "stats": {
+                "total_trades": total_trades,
+                "open_trades": open_trades,
+                "resolved_trades": resolved_count,
+                "win_count": win_count,
+                "win_rate": round(100.0 * win_count / resolved_count, 1) if resolved_count > 0 else None,
+                "net_pnl": round(float(pnl_usd), 2) if pnl_usd is not None else None,
+                "active_markets": active_markets,
+                "threshold_profile": tctx.profile_label,
+            },
+            "last_news_check": _ago(last_article_time),
+            "last_price_sync": _ago(last_snap_time),
+        },
+    )
+
+
 @router.get("/analysis/soft-accuracy", response_class=HTMLResponse)
 async def soft_accuracy_page(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
     not_fixture = Market.is_fixture.is_not(True)
