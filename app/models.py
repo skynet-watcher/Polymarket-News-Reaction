@@ -255,6 +255,15 @@ class PaperTrade(Base):
     # Paper execution audit: ladder summary, partial fill, rejection codes, book depth snapshot.
     execution_context_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
+    # LIVE = created by the real-time signal pipeline.
+    # BACKTEST = simulated by backtest_news_reactions for a missed or counterfactual trade.
+    # Legacy rows default to LIVE (they were all created by the live pipeline).
+    trade_source: Mapped[str] = mapped_column(String, default="LIVE", index=True)
+    # Set when trade_source == "BACKTEST"; links to the BacktestCase that generated this trade.
+    backtest_case_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("backtest_cases.id"), index=True, nullable=True
+    )
+
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
 
     market: Mapped["Market"] = relationship(back_populates="trades")
@@ -488,6 +497,8 @@ class BacktestCase(Base):
     hours_to_resolution: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     implied_outcome: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Action the live pipeline took for this signal: ACT | ABSTAIN | CANDIDATE | REJECT_* | None
+    signal_action: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     p0: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     price_windows_json: Mapped[dict[str, Any]] = mapped_column(JSON)
     first_5pt_move_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

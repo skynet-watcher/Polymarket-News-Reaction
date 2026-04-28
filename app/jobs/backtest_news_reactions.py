@@ -20,8 +20,10 @@ from app.models import (
     Market,
     NewsArticle,
     NewsSignal,
+    PaperTrade,
     PriceSnapshot,
 )
+from app.settings import settings
 from app.util import new_id, now_utc, to_utc_aware
 
 WINDOWS: list[tuple[str, int]] = [
@@ -148,6 +150,83 @@ class _AuditWriter:
             f.write(json.dumps(line, sort_keys=True, default=str) + "\n")
 
 
+def _simulate_backtest_trade(
+    *,
+    market: Market,
+    signal: NewsSignal,
+    case_id: str,
+    p0: float,
+    baseline_snapshot: Optional[PriceSnapshot],
+) -> Optional[PaperTrade]:
+    """
+    Create a BACKTEST-tagged PaperTrade using the historical price at article
+    publication time as the fill. No CLOB depth is used (historical books are
+    unavailable); this is a top-of-book simulation using p0.
+
+    Returns None when the outcome is unknown or p0 is degenerate.
+    """
+    outcome = signal.interpreted_outcome
+    if outcome not in ("YES", "NO"):
+        return None
+    if p0 <= 0.0 or p0 >= 1.0:
+        return None
+
+    bid = baseline_snapshot.best_bid_yes if baseline_snapshot else None
+    ask = baseline_snapshot.best_ask_yes if baseline_snapshot else None
+    mid = float(baseline_snapshot.mid_yes) if baseline_snapshot and baseline_snapshot.mid_yes else p0
+    liq = float(baseline_snapshot.liquidity) if baseline_snapshot and baseline_snapshot.liquidity else (market.liquidity or 0.0)
+
+    # Simplified sizing: same formula as paper.py but without CLOB depth.
+    from app.paper_economics import contracts_for_notional
+    notional_usd = settings.paper_trade_notional_usd
+    entry_fee = round(notional_usd * settings.polymarket_entry_fee_rate, 4)
+
+    if outcome == "YES":
+        fill = min(0.999, p0 + 0.01)
+        side = "BUY_YES"
+    else:
+        fill = min(0.999, (1.0 - p0) + 0.01)
+        side = "BUY_NO"
+
+    contracts = round(contracts_for_notional(notional_usd, float(fill)), 6)
+    if contracts <= 0:
+        return None
+    cash_spent = round(contracts * float(fill) + entry_fee, 4)
+
+    return PaperTrade(
+        id=new_id("trade"),
+        market_id=market.id,
+        signal_id=signal.id,
+        hypothesis_id=None,
+        side=side,
+        simulated_size=float(contracts),
+        fill_price=float(fill),
+        best_bid_at_signal=bid,
+        best_ask_at_signal=ask,
+        mid_at_signal=mid,
+        max_slippage=0.02,
+        confidence=float(signal.confidence or 0.0),
+        status="OPEN",
+        notional_usd=notional_usd,
+        entry_fee_usd=entry_fee,
+        cash_spent_usd=cash_spent,
+        trade_source="BACKTEST",
+        backtest_case_id=case_id,
+        execution_context_json={
+            "mode": "backtest_top_of_book",
+            "side": side,
+            "notional_usd": notional_usd,
+            "entry_fee_usd": entry_fee,
+            "contracts": contracts,
+            "filled_size": contracts,
+            "p0": p0,
+            "cash_spent_usd": cash_spent,
+            "note": "Historical fill — no CLOB depth available",
+        },
+        created_at=now_utc(),
+    )
+
+
 async def _build_case(
     session: AsyncSession,
     *,
@@ -232,6 +311,7 @@ async def _build_case(
         signal_delay_seconds=_seconds_between(signal_created_at, published_at),
         hours_to_resolution=hours_to_resolution,
         implied_outcome=implied_outcome,
+        signal_action=signal.action,
         p0=p0,
         price_windows_json=price_windows,
         first_5pt_move_seconds=first_5pt,
@@ -257,7 +337,7 @@ async def _build_case(
         "max_move_24h": max_move_24h,
         "move_before_fetch": move_before_fetch,
     }
-    return case, payload
+    return case, baseline_snapshot, payload
 
 
 def _summary(cases: list[BacktestCase]) -> dict[str, Any]:
@@ -323,16 +403,61 @@ async def run(
         ).scalars().all()
 
         cases: list[BacktestCase] = []
+        backtest_trades_created = 0
+        live_trades_found = 0
         for sig in signals:
             try:
-                case, payload = await _build_case(
+                case, baseline_snapshot, payload = await _build_case(
                     session,
                     run_id=run_id,
                     signal=sig,
                     min_snapshot_coverage=max(1, min_snapshot_coverage),
                 )
                 session.add(case)
-                await session.flush()
+                await session.flush()  # assigns case.id before trade simulation
+
+                # ── Trade marking ─────────────────────────────────────────────
+                if sig.action == "ACT":
+                    # A real LIVE trade was already created by the pipeline.
+                    # The BacktestCase links to it via signal_id; no duplicate needed.
+                    live_trades_found += 1
+                    await audit.emit(
+                        session,
+                        run_id=run_id,
+                        case_id=case.id,
+                        event_type="LIVE_TRADE_EXISTS",
+                        payload={"signal_id": sig.id, "signal_action": sig.action},
+                    )
+                elif case.p0 is not None and case.implied_outcome in ("YES", "NO"):
+                    # Signal did not result in a live trade — simulate one so we can
+                    # see what would have happened under current thresholds.
+                    article = sig.article or await session.get(NewsArticle, sig.article_id)
+                    market = sig.market or await session.get(Market, sig.market_id)
+                    if article is not None and market is not None:
+                        bt_trade = _simulate_backtest_trade(
+                            market=market,
+                            signal=sig,
+                            case_id=case.id,
+                            p0=case.p0,
+                            baseline_snapshot=baseline_snapshot,
+                        )
+                        if bt_trade is not None:
+                            session.add(bt_trade)
+                            backtest_trades_created += 1
+                            await audit.emit(
+                                session,
+                                run_id=run_id,
+                                case_id=case.id,
+                                event_type="BACKTEST_TRADE_CREATED",
+                                payload={
+                                    "trade_id": bt_trade.id,
+                                    "side": bt_trade.side,
+                                    "fill_price": bt_trade.fill_price,
+                                    "signal_action": sig.action,
+                                    "p0": case.p0,
+                                },
+                            )
+
                 await audit.emit(session, run_id=run_id, case_id=case.id, event_type="CASE_RECORDED", payload=payload)
                 cases.append(case)
             except Exception as exc:
@@ -344,6 +469,8 @@ async def run(
                 )
 
         summary = _summary(cases)
+        summary["backtest_trades_created"] = backtest_trades_created
+        summary["live_trades_found"] = live_trades_found
         bt_run.finished_at = now_utc()
         bt_run.status = "SUCCESS"
         bt_run.summary_json = summary
@@ -357,6 +484,8 @@ async def run(
             "coverage_good": summary["coverage_good"],
             "coverage_sparse": summary["coverage_sparse"],
             "coverage_no_data": summary["coverage_no_data"],
+            "backtest_trades_created": backtest_trades_created,
+            "live_trades_found": live_trades_found,
             "jsonl_path": str(audit.path),
             **summary,
         }

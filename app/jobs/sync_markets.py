@@ -170,15 +170,61 @@ async def _fetch_gamma_open_and_closed_markets_fallback(client: httpx.AsyncClien
     return list(by_id.values())
 
 
+async def _fetch_near_resolution_markets(
+    client: httpx.AsyncClient, within_hours: int = 48, limit: int = 50
+) -> list[dict[str, Any]]:
+    """
+    Fetch active markets whose end_date falls within the next `within_hours` hours.
+
+    These are often thinly-traded but high-velocity: price can move large and fast
+    right before resolution. They rank low in liquidity-sorted fetches and would
+    otherwise be missed by the main universe sweep.
+    """
+    now = dt.datetime.now(dt.timezone.utc)
+    end_before = now + dt.timedelta(hours=within_hours)
+    try:
+        return await _fetch_gamma_markets(
+            client,
+            limit,
+            extra_params={
+                "active": "true",
+                "closed": "false",
+                "end_date_min": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end_date_max": end_before.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        )
+    except (httpx.HTTPError, httpx.RequestError):
+        return []
+
+
 async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str, Any]]:
-    """Prefer /events (volume-sorted); fall back to /markets if events yield nothing."""
+    """
+    Prefer /events (volume-sorted); fall back to /markets if events yield nothing.
+    Always unions in a near-resolution sweep for markets ending within 48h.
+    """
     try:
         from_events = await _fetch_gamma_open_and_closed_via_events(client, limit=100)
-        if from_events:
-            return from_events
     except (httpx.HTTPError, httpx.RequestError):
-        pass
-    return await _fetch_gamma_open_and_closed_markets_fallback(client, limit=200)
+        from_events = []
+
+    if not from_events:
+        from_events = await _fetch_gamma_open_and_closed_markets_fallback(client, limit=200)
+
+    # Near-resolution sweep: union markets ending within 48h regardless of liquidity rank.
+    near_resolution = await _fetch_near_resolution_markets(client, within_hours=48, limit=50)
+
+    # Merge by ID, near-resolution entries take precedence (freshest data).
+    by_id: dict[str, dict[str, Any]] = {}
+    for rm in from_events:
+        mid = str(rm.get("id") or rm.get("market_id") or "").strip()
+        if mid:
+            by_id[mid] = rm
+    for rm in near_resolution:
+        mid = str(rm.get("id") or rm.get("market_id") or "").strip()
+        if mid:
+            by_id[mid] = rm  # overwrite with fresher data
+
+    return list(by_id.values())
 
 
 async def _fetch_best_bid_ask_yes(
