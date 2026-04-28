@@ -48,10 +48,26 @@ def test_init_db_backfills_recent_sqlite_columns() -> None:
                 job_status_cols = {
                     row[1] for row in (await conn.execute(text("PRAGMA table_info(job_statuses)"))).fetchall()
                 }
+                backtest_run_cols = {
+                    row[1] for row in (await conn.execute(text("PRAGMA table_info(backtest_runs)"))).fetchall()
+                }
+                backtest_case_cols = {
+                    row[1] for row in (await conn.execute(text("PRAGMA table_info(backtest_cases)"))).fetchall()
+                }
 
             assert {"market_type", "is_control_market", "manipulation_risk_flag"}.issubset(market_cols)
             assert "signal_source_type" in signal_cols
             assert {"job_name", "status", "started_at", "last_success_at", "last_duration_ms", "last_error"}.issubset(job_status_cols)
+            assert {"id", "started_at", "status", "params_json", "summary_json"}.issubset(backtest_run_cols)
+            assert {
+                "id",
+                "run_id",
+                "article_id",
+                "market_id",
+                "hours_to_resolution",
+                "price_windows_json",
+                "coverage_status",
+            }.issubset(backtest_case_cols)
         finally:
             await engine.dispose()
 

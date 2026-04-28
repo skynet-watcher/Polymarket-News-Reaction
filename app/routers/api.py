@@ -14,7 +14,7 @@ from app.db import SessionLocal, get_session
 from app.job_status import build_system_status, run_tracked_job
 from app.settings import settings
 from app.util import now_utc
-from app.jobs import compute_lag, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
+from app.jobs import backtest_news_reactions, compute_lag, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
 from app.live_feeds import ensure_live_news_sources
 from sqlalchemy import desc, select
 
@@ -97,6 +97,27 @@ async def job_process_candidates(request: Request, session: AsyncSession = Depen
 async def job_settle_trades(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
     out = await run_tracked_job(session, "settle_trades", lambda: settle_trades.run(session))
     return _job_response(request, out, "/trades")
+
+
+@router.post("/jobs/backtest_news_reactions", response_model=None)
+async def job_backtest_news_reactions(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    since_hours: int = Query(72, ge=1, le=24 * 30),
+    max_articles: int = Query(50, ge=1, le=500),
+    min_snapshot_coverage: int = Query(3, ge=1, le=100),
+) -> Union[JSONResponse, RedirectResponse]:
+    out = await run_tracked_job(
+        session,
+        "backtest_news_reactions",
+        lambda: backtest_news_reactions.run(
+            session,
+            since_hours=since_hours,
+            max_articles=max_articles,
+            min_snapshot_coverage=min_snapshot_coverage,
+        ),
+    )
+    return _job_response(request, out, "/analysis/backtests")
 
 
 @router.post("/lag-measurements/backfill", response_model=None)
@@ -250,4 +271,3 @@ async def get_lag_measurements(
             }
         )
     return out
-

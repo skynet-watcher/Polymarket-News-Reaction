@@ -452,6 +452,76 @@ class JobStatus(Base):
     )
 
 
+class BacktestRun(Base):
+    """One local-snapshot news reaction backtest run."""
+
+    __tablename__ = "backtest_runs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String, default="RUNNING")  # RUNNING | SUCCESS | FAILED
+    params_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    summary_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    cases: Mapped[list["BacktestCase"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    events: Mapped[list["BacktestEventLog"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+
+
+class BacktestCase(Base):
+    """One article/market/signal timing and price movement measurement."""
+
+    __tablename__ = "backtest_cases"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    run_id: Mapped[str] = mapped_column(String, ForeignKey("backtest_runs.id"), index=True)
+    article_id: Mapped[str] = mapped_column(String, ForeignKey("news_articles.id"), index=True)
+    market_id: Mapped[str] = mapped_column(String, ForeignKey("markets.id"), index=True)
+    signal_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("news_signals.id"), index=True, nullable=True)
+    lag_measurement_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("lag_measurements.id"), index=True, nullable=True)
+
+    published_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    fetched_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    signal_created_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    polling_delay_seconds: Mapped[float] = mapped_column(Float)
+    signal_delay_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    hours_to_resolution: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    implied_outcome: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    p0: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    price_windows_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    first_5pt_move_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    first_10pt_move_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    max_move_24h: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    move_before_fetch: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    coverage_status: Mapped[str] = mapped_column(String, index=True)  # GOOD | SPARSE | NO_DATA
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
+
+    run: Mapped["BacktestRun"] = relationship(back_populates="cases")
+    article: Mapped["NewsArticle"] = relationship()
+    market: Mapped["Market"] = relationship()
+    signal: Mapped[Optional["NewsSignal"]] = relationship()
+    lag_measurement: Mapped[Optional["LagMeasurement"]] = relationship()
+    events: Mapped[list["BacktestEventLog"]] = relationship(back_populates="case")
+
+
+class BacktestEventLog(Base):
+    """Structured audit event mirrored to JSONL by the backtest runner."""
+
+    __tablename__ = "backtest_event_logs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    run_id: Mapped[str] = mapped_column(String, ForeignKey("backtest_runs.id"), index=True)
+    case_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("backtest_cases.id"), index=True, nullable=True)
+    event_type: Mapped[str] = mapped_column(String, index=True)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
+
+    run: Mapped["BacktestRun"] = relationship(back_populates="events")
+    case: Mapped[Optional["BacktestCase"]] = relationship(back_populates="events")
+
+
 class AuditLog(Base):
     """
     FUTURE STATE — not wired to any execution path yet.
@@ -468,4 +538,3 @@ class AuditLog(Base):
     signal_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     payload_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
-

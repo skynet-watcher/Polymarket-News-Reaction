@@ -97,6 +97,10 @@ Use this if you are heads-down and only have the repo + terminal.
 
 ## P2 — Product / research
 
+18a. **News reaction backtester**
+    - Phase 1 local snapshots only: measure publication→fetch/system delay and post-publication market movement.
+    - **Status:** implemented locally for review: `BacktestRun`, `BacktestCase`, `BacktestEventLog`, `POST /api/jobs/backtest_news_reactions`, `/analysis/backtests`, and JSONL audit logs under `logs/backtests/`.
+
 18. **Laggy markets: explain the score**  
     - Tooltip or `/analysis/laggy-markets` paragraph: what `combined_score` means, data prerequisites.
 
@@ -140,6 +144,7 @@ Use this if you are heads-down and only have the repo + terminal.
 
 - **2026-04-27 —** P0 item 1: `.git` repaired; `origin` → `https://github.com/skynet-watcher/Polymarket-News-Reaction.git`; `main` pushed / tracked. Local-only paths ignored: `.env`, `*.db*`, `Keys/`.
 - **2026-04-28 —** Hands-off **realtime paper**: `REALTIME_PAPER_QUICKSTART` + `make run-realtime`, README runbook/soak/SSE/proxy, snapshot loop heartbeat, async lag backfill (P1 #7), `GET /api/export/summary`, System status shows last job duration + row links, dashboard JS parity.
+- **2026-04-28 —** Phase 1 **news reaction backtester** implemented locally for review: local `price_snapshots` only, DB rows + JSONL event log, `/analysis/backtests`, and job endpoint with `since_hours`, `max_articles`, `min_snapshot_coverage`. Full suite: `52 passed`. Not pushed.
 
 ---
 

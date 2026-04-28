@@ -13,6 +13,8 @@ from app.dashboard_data import get_dashboard_snapshot
 from app.db import get_session
 from app.job_status import build_system_status
 from app.models import (
+    BacktestCase,
+    BacktestRun,
     LagMeasurement,
     LagThresholdCrossing,
     Market,
@@ -195,6 +197,44 @@ async def analysis(request: Request, session: AsyncSession = Depends(get_session
             "correct_count": correct_count,
             "median_lag": median_lag,
             "status_counts": status_counts,
+        },
+    )
+
+
+@router.get("/analysis/backtests", response_class=HTMLResponse)
+async def backtests(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    runs = (
+        await session.execute(select(BacktestRun).order_by(desc(BacktestRun.started_at)).limit(20))
+    ).scalars().all()
+    latest = runs[0] if runs else None
+    cases = []
+    coverage_counts = []
+    if latest is not None:
+        cases = (
+            await session.execute(
+                select(BacktestCase)
+                .where(BacktestCase.run_id == latest.id)
+                .order_by(desc(BacktestCase.created_at))
+                .limit(200)
+            )
+        ).scalars().all()
+        coverage_rows = (
+            await session.execute(
+                select(BacktestCase.coverage_status, func.count().label("count"))
+                .where(BacktestCase.run_id == latest.id)
+                .group_by(BacktestCase.coverage_status)
+            )
+        ).all()
+        coverage_counts = [{"status": row[0], "count": row[1]} for row in coverage_rows]
+
+    return templates.TemplateResponse(
+        "backtests.html",
+        {
+            "request": request,
+            "runs": runs,
+            "latest": latest,
+            "cases": cases,
+            "coverage_counts": coverage_counts,
         },
     )
 
@@ -393,4 +433,3 @@ async def soft_accuracy_page(request: Request, session: AsyncSession = Depends(g
         rate = (100.0 * c / (c + w)) if (c + w) > 0 else None
         tiers.append({"tier": r.tier, "n": n, "correct": c, "wrong": w, "rate": rate})
     return templates.TemplateResponse("soft_accuracy.html", {"request": request, "tiers": tiers})
-

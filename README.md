@@ -162,14 +162,38 @@ location /api/stream/dashboard {
 - `POST /api/jobs/poll_news`
 - `POST /api/jobs/process_candidates`
 - `POST /api/jobs/settle_trades`
+- `POST /api/jobs/backtest_news_reactions?since_hours=72&max_articles=50&min_snapshot_coverage=3`
 - `POST /api/lag-measurements/backfill` (returns immediately; job runs in the **background** — watch System status)
 - `GET /api/export/summary` — JSON snapshot (counts + system status rows) for logs or chat paste
 
 All jobs are designed to be **idempotent**.
+
+### Backtesting news reactions
+
+Use **Analysis → Backtests** or `POST /api/jobs/backtest_news_reactions` to measure how quickly markets moved after article publication using only locally stored `price_snapshots`.
+
+Phase 1 logs:
+
+- news polling delay: `NewsArticle.fetched_at - NewsArticle.published_at`
+- signal delay: `NewsSignal.created_at - NewsArticle.published_at`
+- hours to resolution: `Market.end_date - NewsArticle.published_at`
+- p0 near publication
+- fixed post-publication windows: 1m, 5m, 15m, 30m, 1h, 4h, 24h
+- first +5pt / +10pt move
+- max 24h move
+- whether the first +5pt move happened before the article was fetched
+- coverage status: `GOOD`, `SPARSE`, or `NO_DATA`
+
+Every run writes queryable DB rows and mirrors structured audit events to:
+
+```text
+logs/backtests/backtest_<run_id>.jsonl
+```
+
+The JSONL logs are local runtime artifacts and are ignored by Git.
 
 ### Upgrade note: source tiers
 
 This MVP does not ship Alembic migrations. Existing `news_sources.source_tier` / `news_articles.source_tier` rows may still contain older tier labels after upgrading.
 
 **Operators should re-save sources in Settings** (or update rows manually) so tiers align with the current scheme: `SOFT`, `HARD`, `RESOLUTION_SOURCE`.
-

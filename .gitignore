@@ -22,6 +22,7 @@ venv/
 .env.*
 !.env.example
 Keys/
+logs/
 
 # SQLite (local dev)
 *.db

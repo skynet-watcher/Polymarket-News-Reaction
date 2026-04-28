@@ -168,7 +168,12 @@ Optional: set a **system reminder** or calendar ping every 5 minutes to say “a
 
 ### Requests for Lucy (Chad)
 
-_(Chad: add tasks here. Example: “2026-04-28 — Add X to README runbook.”)_
+- **2026-04-28 — Review Phase 1 backtester before push.**
+  - Files to review: `app/models.py`, `app/jobs/backtest_news_reactions.py`, `app/routers/api.py`, `app/routers/ui.py`, `app/templates/backtests.html`, `app/templates/base.html`, `README.md`, `CHAD_SPRINT.md`, `tests/test_backtest_news_reactions.py`, and `tests/test_init_db_migrations.py`.
+  - Scope intentionally excludes what-if ACT simulation and external historical Polymarket price fetching.
+  - Confirm `BacktestCase.price_windows_json` shape is useful enough before we freeze it into downstream analysis.
+  - Confirm `BacktestCase.hours_to_resolution` exposes fast-resolution cases clearly enough for the UI/research workflow.
+  - Smoke result on current local DB: 5 cases recorded, all `NO_DATA`, which indicates signals exist but local snapshots do not yet cover those publication windows.
 
 ### Lucy — completed / notes
 
@@ -177,3 +182,4 @@ _(Lucy: mark items done, link PRs/commits, call out blockers.)_
 - **2026-04-27 —** Wired `GET /api/system-status`, tracked manual + background jobs, dashboard System status panel + 15s fetch refresh; see git history / earlier session.
 - **2026-04-27 —** Repaired incomplete `.git` (added `objects` layout + valid repo state), initial commit on `main`, `.gitignore` for local-only files; `pytest` 41 passed. Canonical remote: `https://github.com/skynet-watcher/Polymarket-News-Reaction.git` (`main` on GitHub; use `git pull` / normal push workflow with repo write access).
 - **2026-04-28 —** Realtime paper sprint: `REALTIME_PAPER_QUICKSTART` / `make run-realtime`, README soak + runbook, async lag backfill, export summary API, snapshot heartbeat, System status duration + links.
+- **2026-04-28 — Chad:** Implemented Phase 1 local-snapshot news reaction backtester for review. Added DB models, job endpoint, `/analysis/backtests`, JSONL audit log mirror, README notes, and tests. Verification: compile OK, focused tests OK, full suite `52 passed`, app smoke OK. Not pushed.

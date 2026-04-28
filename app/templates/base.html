@@ -65,6 +65,7 @@
         <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/signals">Signals</a>
         <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/trades">Paper trades</a>
         <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis">Analysis</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/backtests">Backtests</a>
         <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/lags">Lag analysis</a>
         <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/laggy-markets">Laggy markets</a>
         <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/soft-accuracy">Soft accuracy</a>
@@ -100,9 +101,13 @@
             var label = form.getAttribute("data-job-label") || "Job";
             var doneUrl = form.getAttribute("data-done-url");
             var asyncBg = form.getAttribute("data-async-background") === "true";
+            var url = new URL(form.action, window.location.href);
+            new FormData(form).forEach(function (value, key) {
+              if (value !== "") url.searchParams.set(key, value);
+            });
             showToast(label + "… running (please wait)", false);
 
-            fetch(form.action, {
+            fetch(url.toString(), {
               method: "POST",
               headers: { Accept: "application/json" },
               credentials: "same-origin",
@@ -150,4 +155,3 @@
     </script>
   </body>
 </html>
-

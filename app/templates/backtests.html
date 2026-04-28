@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+  <div>
+    <h1 class="text-xl font-semibold">News Reaction Backtests</h1>
+    <p class="text-slate-400 text-sm mt-1 max-w-3xl">
+      Local-snapshot backtests measure system delay from publication to fetch/signal, then compare it with market movement after publication.
+      Phase 1 uses only stored price snapshots; external historical prices and what-if ACT simulation are intentionally out of scope.
+    </p>
+  </div>
+  <form class="js-async-job flex flex-wrap items-end gap-2 text-sm" method="post" action="/api/jobs/backtest_news_reactions" data-job-label="Backtest news reactions" data-done-url="/analysis/backtests">
+    <label>
+      <span class="block text-xs text-slate-400 mb-1">Since hours</span>
+      <input class="w-24 rounded bg-slate-950 border border-slate-800 px-2 py-1" type="number" min="1" max="720" name="since_hours" value="72" />
+    </label>
+    <label>
+      <span class="block text-xs text-slate-400 mb-1">Max cases</span>
+      <input class="w-24 rounded bg-slate-950 border border-slate-800 px-2 py-1" type="number" min="1" max="500" name="max_articles" value="50" />
+    </label>
+    <label>
+      <span class="block text-xs text-slate-400 mb-1">Min snapshots</span>
+      <input class="w-28 rounded bg-slate-950 border border-slate-800 px-2 py-1" type="number" min="1" max="100" name="min_snapshot_coverage" value="3" />
+    </label>
+    <button type="submit" class="px-3 py-2 rounded bg-amber-600 hover:bg-amber-500">Run backtest</button>
+  </form>
+</div>
+
+{% if latest %}
+  {% set summary = latest.summary_json or {} %}
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+    <div class="rounded bg-slate-900 p-4">
+      <div class="text-2xl font-semibold">{{ summary.get("cases", 0) }}</div>
+      <div class="text-xs text-slate-400 uppercase">Cases</div>
+    </div>
+    <div class="rounded bg-slate-900 p-4">
+      <div class="text-2xl font-semibold">{{ summary.get("coverage_good", 0) }}</div>
+      <div class="text-xs text-slate-400 uppercase">Good data</div>
+    </div>
+    <div class="rounded bg-slate-900 p-4">
+      <div class="text-2xl font-semibold">{{ "%.0f"|format(summary.get("median_polling_delay_seconds") or 0) }}s</div>
+      <div class="text-xs text-slate-400 uppercase">Median fetch delay</div>
+    </div>
+    <div class="rounded bg-slate-900 p-4">
+      <div class="text-2xl font-semibold">
+        {% if summary.get("median_first_5pt_move_seconds") is not none %}
+          {{ summary.get("median_first_5pt_move_seconds") | format_lag }}
+        {% else %}
+          —
+        {% endif %}
+      </div>
+      <div class="text-xs text-slate-400 uppercase">Median +5pt move</div>
+    </div>
+    <div class="rounded bg-slate-900 p-4">
+      <div class="text-2xl font-semibold">{{ summary.get("move_before_fetch_count", 0) }}</div>
+      <div class="text-xs text-slate-400 uppercase">Moved before fetch</div>
+    </div>
+  </div>
+
+  <div class="rounded bg-slate-900 p-4 mb-6">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+      <div>
+        <div class="text-sm font-semibold">Latest run</div>
+        <div class="text-xs text-slate-500">{{ latest.id }} · {{ latest.status }} · started {{ latest.started_at }}</div>
+      </div>
+      <div class="text-xs text-slate-400">
+        {% for row in coverage_counts %}
+          <span class="mr-3">{{ row.status }}: {{ row.count }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="overflow-auto">
+      <table class="w-full text-sm">
+        <thead class="text-slate-400 text-left">
+          <tr>
+            <th class="py-2 pr-3">coverage</th>
+            <th class="py-2 pr-3">published</th>
+            <th class="py-2 pr-3">fetch delay</th>
+            <th class="py-2 pr-3">signal delay</th>
+            <th class="py-2 pr-3">to resolution</th>
+            <th class="py-2 pr-3">p0</th>
+            <th class="py-2 pr-3">+5pt</th>
+            <th class="py-2 pr-3">+10pt</th>
+            <th class="py-2 pr-3">max 24h</th>
+            <th class="py-2 pr-3">before fetch</th>
+            <th class="py-2 pr-3">notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in cases %}
+            <tr class="border-t border-slate-800 align-top">
+              <td class="py-2 pr-3">{{ c.coverage_status }}</td>
+              <td class="py-2 pr-3 whitespace-nowrap">{{ c.published_at }}</td>
+              <td class="py-2 pr-3">{{ c.polling_delay_seconds | format_lag }}</td>
+              <td class="py-2 pr-3">{% if c.signal_delay_seconds is not none %}{{ c.signal_delay_seconds | format_lag }}{% else %}—{% endif %}</td>
+              <td class="py-2 pr-3">
+                {% if c.hours_to_resolution is not none %}
+                  {{ "%.1f"|format(c.hours_to_resolution) }}h
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td class="py-2 pr-3">{% if c.p0 is not none %}{{ "%.3f"|format(c.p0) }}{% else %}—{% endif %}</td>
+              <td class="py-2 pr-3">{% if c.first_5pt_move_seconds is not none %}{{ c.first_5pt_move_seconds | format_lag }}{% else %}—{% endif %}</td>
+              <td class="py-2 pr-3">{% if c.first_10pt_move_seconds is not none %}{{ c.first_10pt_move_seconds | format_lag }}{% else %}—{% endif %}</td>
+              <td class="py-2 pr-3">{% if c.max_move_24h is not none %}{{ "%.3f"|format(c.max_move_24h) }}{% else %}—{% endif %}</td>
+              <td class="py-2 pr-3">{% if c.move_before_fetch is sameas true %}yes{% elif c.move_before_fetch is sameas false %}no{% else %}—{% endif %}</td>
+              <td class="py-2 pr-3 text-slate-400">{{ c.notes or "" }}</td>
+            </tr>
+          {% endfor %}
+          {% if not cases %}
+            <tr>
+              <td colspan="11" class="py-8 text-center text-slate-500 text-sm">
+                Latest run had no cases. Process candidates first, then rerun the backtest.
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% else %}
+  <div class="rounded bg-slate-900 p-8 text-center text-slate-400 text-sm">
+    No backtest runs yet. Process candidates to create article/market signals, then run a backtest.
+  </div>
+{% endif %}
+
+<div class="rounded bg-slate-900 p-4">
+  <div class="text-sm font-semibold mb-3">Recent runs</div>
+  <table class="w-full text-sm">
+    <thead class="text-slate-400 text-left">
+      <tr>
+        <th class="py-2 pr-3">started</th>
+        <th class="py-2 pr-3">status</th>
+        <th class="py-2 pr-3">cases</th>
+        <th class="py-2 pr-3">params</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+        <tr class="border-t border-slate-800">
+          <td class="py-2 pr-3 whitespace-nowrap">{{ r.started_at }}</td>
+          <td class="py-2 pr-3">{{ r.status }}</td>
+          <td class="py-2 pr-3">{{ (r.summary_json or {}).get("cases", "—") }}</td>
+          <td class="py-2 pr-3 text-slate-400">{{ r.params_json }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -29,6 +29,7 @@ JOB_LABELS: dict[str, str] = {
     "poll_news": "News polling",
     "process_candidates": "Candidate processing",
     "settle_trades": "Settlement",
+    "backtest_news_reactions": "News reaction backtest",
     "lag_backfill": "Lag backfill",
     "signal_metrics": "Signal metrics",
     "lag_ranks": "Lag ranks",
@@ -43,6 +44,7 @@ JOB_LINKS: dict[str, str] = {
     "signal_metrics": "/analysis",
     "lag_ranks": "/analysis/laggy-markets",
     "settle_trades": "/trades",
+    "backtest_news_reactions": "/analysis/backtests",
 }
 
 JOB_ACTIONS: dict[str, str] = {
@@ -53,6 +55,7 @@ JOB_ACTIONS: dict[str, str] = {
     "signal_metrics": "/api/jobs/compute_signal_metrics",
     "lag_ranks": "/api/jobs/compute_lag_ranks",
     "settle_trades": "/api/jobs/settle_trades",
+    "backtest_news_reactions": "/api/jobs/backtest_news_reactions",
 }
 
 
