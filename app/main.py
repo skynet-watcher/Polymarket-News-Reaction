@@ -19,7 +19,7 @@ from app.models import NewsSource, RuntimeSetting
 from app.threshold_context import DEFAULT_PROFILE_ID, RUNTIME_KEY_THRESHOLD_PROFILE
 from app.threshold_profiles_seed import ensure_default_threshold_profiles
 from app import background_loops
-from app.jobs import sync_markets, settle_trades
+from app.jobs import sync_markets, settle_trades, poll_news, process_candidates
 from app.realtime_policy import invested_hours_to_resolution, next_snapshot_tick_sleep_seconds
 from app.settings import settings
 from app.routers import api, ui
@@ -111,6 +111,25 @@ async def _startup() -> None:
             await asyncio.sleep(sleep_s)
 
     asyncio.create_task(_snapshot_loop())
+
+    async def _warm_start() -> None:
+        """Run each job once at startup so Eric never has to click a button.
+        Waits 5s for the DB/snapshot loop to settle, then sequences:
+        markets → news → candidates → settle."""
+        await asyncio.sleep(5)
+        for job_name, job_fn in [
+            ("sync_markets", sync_markets.run),
+            ("poll_news", poll_news.run),
+            ("process_candidates", process_candidates.run),
+            ("settle_trades", settle_trades.run),
+        ]:
+            try:
+                await run_tracked_background_job(job_name, job_fn, session_factory=SessionLocal)
+                logger.info("warm_start: %s done", job_name)
+            except Exception:
+                logger.exception("warm_start: %s failed", job_name)
+
+    asyncio.create_task(_warm_start())
 
     async def _settle_loop() -> None:
         while True:
