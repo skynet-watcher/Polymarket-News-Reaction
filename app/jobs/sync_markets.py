@@ -199,30 +199,71 @@ async def _fetch_near_resolution_markets(
 
 async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str, Any]]:
     """
-    Prefer /events (volume-sorted); fall back to /markets if events yield nothing.
-    Always unions in a near-resolution sweep for markets ending within 48h.
+    Always runs BOTH fetch paths and merges results.
+
+    /events   → volume-sorted, includes resolutionSource / rules metadata,
+                but does NOT return tokenIds (needed for CLOB price fetching).
+    /markets  → includes tokenIds; used to fill that gap.
+
+    Merge strategy:
+      1. Seed from /events (richer metadata, good ordering).
+      2. Overwrite/supplement with /markets data — adds tokenIds to existing
+         entries and picks up any markets the events path missed.
+      3. Union near-resolution sweep (markets ending within 48h) on top.
     """
+    events_exc: Optional[Exception] = None
+    markets_exc: Optional[Exception] = None
+
     try:
         from_events = await _fetch_gamma_open_and_closed_via_events(client, limit=100)
-    except (httpx.HTTPError, httpx.RequestError):
+    except (httpx.HTTPError, httpx.RequestError) as e:
         from_events = []
+        events_exc = e
 
-    if not from_events:
-        from_events = await _fetch_gamma_open_and_closed_markets_fallback(client, limit=200)
+    try:
+        from_markets = await _fetch_gamma_open_and_closed_markets_fallback(client, limit=200)
+    except (httpx.HTTPError, httpx.RequestError) as e:
+        from_markets = []
+        markets_exc = e
 
-    # Near-resolution sweep: union markets ending within 48h regardless of liquidity rank.
+    # If BOTH primary paths failed, re-raise so the caller can trigger fixture fallback.
+    if events_exc is not None and markets_exc is not None:
+        raise markets_exc
+
+    # Near-resolution sweep is optional — never blocks on failure.
     near_resolution = await _fetch_near_resolution_markets(client, within_hours=48, limit=50)
 
-    # Merge by ID, near-resolution entries take precedence (freshest data).
     by_id: dict[str, dict[str, Any]] = {}
+
+    # Seed with events data (metadata-rich).
     for rm in from_events:
         mid = str(rm.get("id") or rm.get("market_id") or "").strip()
         if mid:
             by_id[mid] = rm
+
+    # Merge /markets: adds tokenIds; for known markets, patch rather than replace
+    # so we keep the richer events metadata (resolutionSource, rules, etc.).
+    for rm in from_markets:
+        mid = str(rm.get("id") or rm.get("market_id") or "").strip()
+        if not mid:
+            continue
+        if mid in by_id:
+            existing = by_id[mid]
+            # Patch in tokenIds if the events entry is missing them.
+            if not existing.get("tokenIds") and rm.get("tokenIds"):
+                existing["tokenIds"] = rm["tokenIds"]
+            # Patch in any other fields the events path left empty.
+            for key in ("category", "slug", "description"):
+                if not existing.get(key) and rm.get(key):
+                    existing[key] = rm[key]
+        else:
+            by_id[mid] = rm
+
+    # Near-resolution entries overwrite with the freshest data.
     for rm in near_resolution:
         mid = str(rm.get("id") or rm.get("market_id") or "").strip()
         if mid:
-            by_id[mid] = rm  # overwrite with fresher data
+            by_id[mid] = rm
 
     return list(by_id.values())
 
