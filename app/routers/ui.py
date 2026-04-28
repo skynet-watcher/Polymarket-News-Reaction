@@ -49,8 +49,11 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
     ctx["dashboard_sse_enabled"] = app_settings.dashboard_sse_enabled
     ctx["system_status"] = await build_system_status(session)
     # Template expects ORM rows for initial render; reuse snapshot dict + raw rows for table.
+    not_fixture = Market.is_fixture.is_not(True)
     recent = (
-        await session.execute(select(NewsSignal).order_by(desc(NewsSignal.created_at)).limit(20))
+        await session.execute(
+            select(NewsSignal).join(Market).where(not_fixture).order_by(desc(NewsSignal.created_at)).limit(20)
+        )
     ).scalars().all()
     ctx["recent_signals"] = recent
     return templates.TemplateResponse("dashboard.html", ctx)
@@ -150,17 +153,30 @@ async def trades(request: Request, session: AsyncSession = Depends(get_session))
 
 @router.get("/analysis", response_class=HTMLResponse)
 async def analysis(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
-    act_count = (await session.execute(select(func.count()).select_from(LagMeasurement))).scalar_one()
+    not_fixture = Market.is_fixture.is_not(True)
+    act_count = (
+        await session.execute(
+            select(func.count()).select_from(LagMeasurement).join(Market).where(not_fixture)
+        )
+    ).scalar_one()
 
     crossed_count = (
         await session.execute(
-            select(func.count()).select_from(LagMeasurement).where(LagMeasurement.price_lag_status == "CROSSED")
+            select(func.count())
+            .select_from(LagMeasurement)
+            .join(Market)
+            .where(not_fixture)
+            .where(LagMeasurement.price_lag_status == "CROSSED")
         )
     ).scalar_one()
 
     correct_count = (
         await session.execute(
-            select(func.count()).select_from(LagMeasurement).where(LagMeasurement.signal_correct == True)  # noqa: E712
+            select(func.count())
+            .select_from(LagMeasurement)
+            .join(Market)
+            .where(not_fixture)
+            .where(LagMeasurement.signal_correct == True)  # noqa: E712
         )
     ).scalar_one()
 
@@ -168,7 +184,9 @@ async def analysis(request: Request, session: AsyncSession = Depends(get_session
         await session.execute(
             select(LagThresholdCrossing.lag_seconds)
             .join(LagMeasurement, LagThresholdCrossing.lag_measurement_id == LagMeasurement.id)
+            .join(Market, LagMeasurement.market_id == Market.id)
             .where(
+                not_fixture,
                 LagThresholdCrossing.threshold_label == "10PT",
                 LagThresholdCrossing.lag_seconds.is_not(None),
             )
@@ -184,7 +202,10 @@ async def analysis(request: Request, session: AsyncSession = Depends(get_session
 
     status_rows = (
         await session.execute(
-            select(LagMeasurement.price_lag_status, func.count().label("count")).group_by(LagMeasurement.price_lag_status)
+            select(LagMeasurement.price_lag_status, func.count().label("count"))
+            .join(Market, LagMeasurement.market_id == Market.id)
+            .where(not_fixture)
+            .group_by(LagMeasurement.price_lag_status)
         )
     ).all()
     status_counts = [{"status": r[0], "count": r[1]} for r in status_rows]
@@ -220,7 +241,12 @@ async def backtests(
     coverage_counts = []
     action_counts = []
     if latest is not None:
-        case_query = select(BacktestCase).where(BacktestCase.run_id == latest.id)
+        case_query = (
+            select(BacktestCase)
+            .join(Market, BacktestCase.market_id == Market.id)
+            .where(BacktestCase.run_id == latest.id)
+            .where(Market.is_fixture.is_not(True))
+        )
         if signal_action:
             if signal_action == "NONE":
                 case_query = case_query.where(BacktestCase.signal_action.is_(None))
@@ -236,7 +262,9 @@ async def backtests(
         coverage_rows = (
             await session.execute(
                 select(BacktestCase.coverage_status, func.count().label("count"))
+                .join(Market, BacktestCase.market_id == Market.id)
                 .where(BacktestCase.run_id == latest.id)
+                .where(Market.is_fixture.is_not(True))
                 .group_by(BacktestCase.coverage_status)
             )
         ).all()
@@ -244,7 +272,9 @@ async def backtests(
         action_rows = (
             await session.execute(
                 select(BacktestCase.signal_action, func.count().label("count"))
+                .join(Market, BacktestCase.market_id == Market.id)
                 .where(BacktestCase.run_id == latest.id)
+                .where(Market.is_fixture.is_not(True))
                 .group_by(BacktestCase.signal_action)
                 .order_by(desc(func.count()))
             )
@@ -268,8 +298,15 @@ async def backtests(
 
 @router.get("/analysis/lags", response_class=HTMLResponse)
 async def lag_analysis(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    not_fixture = Market.is_fixture.is_not(True)
     lms = (
-        await session.execute(select(LagMeasurement).order_by(desc(LagMeasurement.created_at)).limit(200))
+        await session.execute(
+            select(LagMeasurement)
+            .join(Market, LagMeasurement.market_id == Market.id)
+            .where(not_fixture)
+            .order_by(desc(LagMeasurement.created_at))
+            .limit(200)
+        )
     ).scalars().all()
     if not lms:
         return templates.TemplateResponse("lags.html", {"request": request, "rows": []})
@@ -421,9 +458,11 @@ async def add_resolution_mapping(request: Request, session: AsyncSession = Depen
 
 @router.get("/analysis/laggy-markets", response_class=HTMLResponse)
 async def laggy_markets_page(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    not_fixture = Market.is_fixture.is_not(True)
     q = (
         select(MarketLagScore, Market)
         .join(Market, Market.id == MarketLagScore.market_id)
+        .where(not_fixture)
         .order_by(desc(MarketLagScore.combined_score))
         .limit(200)
     )
@@ -440,6 +479,7 @@ async def laggy_markets_page(request: Request, session: AsyncSession = Depends(g
 
 @router.get("/analysis/soft-accuracy", response_class=HTMLResponse)
 async def soft_accuracy_page(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    not_fixture = Market.is_fixture.is_not(True)
     tier_col = func.coalesce(LagMeasurement.source_tier, literal("UNKNOWN"))
     stmt = (
         select(
@@ -448,7 +488,10 @@ async def soft_accuracy_page(request: Request, session: AsyncSession = Depends(g
             func.sum(case((LagMeasurement.signal_correct == True, 1), else_=0)).label("correct"),  # noqa: E712
             func.sum(case((LagMeasurement.signal_correct == False, 1), else_=0)).label("wrong"),
         )
+        .select_from(LagMeasurement)
+        .join(Market, LagMeasurement.market_id == Market.id)
         .where(LagMeasurement.signal_correct.is_not(None))
+        .where(not_fixture)
         .group_by(tier_col)
     )
     raw_rows = (await session.execute(stmt)).all()

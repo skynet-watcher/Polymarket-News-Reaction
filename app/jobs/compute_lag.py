@@ -140,6 +140,9 @@ async def run_backfill(
         article = (await session.execute(select(NewsArticle).where(NewsArticle.id == sig.article_id))).scalar_one()
         source = (await session.execute(select(NewsSource).where(NewsSource.id == article.source_id))).scalar_one()
 
+        if market.is_fixture:
+            continue
+
         signal_time = article.published_at
         implied_outcome = sig.interpreted_outcome
         touched_market_outcomes.add((market.id, implied_outcome))

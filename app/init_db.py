@@ -30,6 +30,13 @@ async def init_db(engine: AsyncEngine) -> None:
             column="manipulation_risk_flag",
             ddl="ALTER TABLE markets ADD COLUMN manipulation_risk_flag BOOLEAN DEFAULT 0",
         )
+        await _ensure_column(conn, table="markets", column="is_fixture", ddl="ALTER TABLE markets ADD COLUMN is_fixture BOOLEAN DEFAULT 0")
+        try:
+            await conn.execute(
+                text("UPDATE markets SET is_fixture = 1 WHERE id = \'smoke_mkt\' OR id LIKE \'demo%\'")
+            )
+        except Exception:
+            pass
         await _ensure_column(
             conn, table="news_signals", column="signal_source_type", ddl="ALTER TABLE news_signals ADD COLUMN signal_source_type VARCHAR"
         )

@@ -10,7 +10,7 @@ from app.models import RuntimeSetting, ThresholdProfile
 from app.settings import settings
 
 RUNTIME_KEY_THRESHOLD_PROFILE = "threshold_profile_id"
-DEFAULT_PROFILE_ID = "conservative"
+DEFAULT_PROFILE_ID = "research"
 
 
 @dataclass(frozen=True)
@@ -37,7 +37,7 @@ def _fallback_from_settings() -> TradingThresholdContext:
         max_article_age_minutes=settings.max_article_age_minutes,
         allow_indirect_evidence=False,
         paper_size_multiplier=1.0,
-        profile_id=DEFAULT_PROFILE_ID,
+        profile_id="conservative",
         profile_label="Settings fallback",
     )
 

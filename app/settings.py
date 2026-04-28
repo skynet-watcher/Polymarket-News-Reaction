@@ -123,6 +123,8 @@ class Settings(BaseSettings):
     matcher_llm_batch_size: int = 8
     # Minimum LLM relevance score to promote a candidate to interpret+verify.
     matcher_llm_min_relevance: float = 0.50
+    # Hard safety cap for relevance-screen LLM calls per process_candidates run.
+    max_llm_calls_per_run: int = 50
 
     @model_validator(mode="after")
     def apply_realtime_paper_quickstart(self):

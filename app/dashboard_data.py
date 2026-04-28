@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Market, NewsArticle, NewsSignal, NewsSource, PaperTrade, PriceSnapshot
+from app.models import Market, NewsArticle, NewsSignal, NewsSource, PaperTrade, PriceSnapshot, RuntimeSetting
 from app.threshold_context import resolve_trading_thresholds
 from app.util import now_utc, to_utc_aware
 
@@ -28,25 +28,42 @@ def _sig_row(s: NewsSignal) -> dict[str, Any]:
 
 
 async def get_dashboard_snapshot(session: AsyncSession) -> dict[str, Any]:
-    markets_count = (await session.execute(select(func.count()).select_from(Market))).scalar_one()
+    # Exclude fixture / demo markets from headline counts and price freshness (see ALEX_REVIEW L5).
+    not_fixture = Market.is_fixture.is_not(True)
+    markets_count = (await session.execute(select(func.count()).select_from(Market).where(not_fixture))).scalar_one()
     sources_count = (await session.execute(select(func.count()).select_from(NewsSource))).scalar_one()
     articles_count = (await session.execute(select(func.count()).select_from(NewsArticle))).scalar_one()
-    signals_count = (await session.execute(select(func.count()).select_from(NewsSignal))).scalar_one()
-    trades_count = (await session.execute(select(func.count()).select_from(PaperTrade))).scalar_one()
+    signals_count = (
+        await session.execute(select(func.count()).select_from(NewsSignal).join(Market).where(not_fixture))
+    ).scalar_one()
+    trades_count = (
+        await session.execute(select(func.count()).select_from(PaperTrade).join(Market).where(not_fixture))
+    ).scalar_one()
 
     recent_signals = (
-        await session.execute(select(NewsSignal).order_by(desc(NewsSignal.created_at)).limit(20))
+        await session.execute(
+            select(NewsSignal).join(Market).where(not_fixture).order_by(desc(NewsSignal.created_at)).limit(20)
+        )
     ).scalars().all()
 
-    last_snap = (await session.execute(select(func.max(PriceSnapshot.timestamp)))).scalar_one_or_none()
+    last_snap = (
+        await session.execute(
+            select(func.max(PriceSnapshot.timestamp))
+            .select_from(PriceSnapshot)
+            .join(Market)
+            .where(not_fixture)
+        )
+    ).scalar_one_or_none()
     last_article = (await session.execute(select(func.max(NewsArticle.published_at)))).scalar_one_or_none()
 
     act_24h = (
         await session.execute(
             select(func.count())
             .select_from(NewsSignal)
+            .join(Market)
             .where(NewsSignal.action == "ACT")
             .where(NewsSignal.created_at >= now_utc() - dt.timedelta(hours=24))
+            .where(not_fixture)
         )
     ).scalar_one()
 
@@ -58,6 +75,16 @@ async def get_dashboard_snapshot(session: AsyncSession) -> dict[str, Any]:
     )
 
     tctx = await resolve_trading_thresholds(session)
+    llm_cost_row = await session.get(RuntimeSetting, "llm_estimated_input_cost_usd_total")
+    llm_calls_row = await session.get(RuntimeSetting, "llm_relevance_calls_total")
+    try:
+        llm_estimated_input_cost_usd_total = float(llm_cost_row.value) if llm_cost_row is not None else 0.0
+    except ValueError:
+        llm_estimated_input_cost_usd_total = 0.0
+    try:
+        llm_relevance_calls_total = int(llm_calls_row.value) if llm_calls_row is not None else 0
+    except ValueError:
+        llm_relevance_calls_total = 0
 
     return {
         "last_snap_age_min": last_snap_age_min,
@@ -65,6 +92,8 @@ async def get_dashboard_snapshot(session: AsyncSession) -> dict[str, Any]:
         "act_24h": act_24h,
         "threshold_profile_label": tctx.profile_label,
         "threshold_profile_id": tctx.profile_id,
+        "llm_estimated_input_cost_usd_total": llm_estimated_input_cost_usd_total,
+        "llm_relevance_calls_total": llm_relevance_calls_total,
         "counts": {
             "markets": markets_count,
             "sources": sources_count,

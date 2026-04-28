@@ -28,6 +28,7 @@
             <th class="text-left py-2 pr-3">conf</th>
             <th class="text-left py-2 pr-3">verifier</th>
             <th class="text-left py-2 pr-3">action</th>
+            <th class="text-left py-2 pr-3">reason</th>
           </tr>
         </thead>
         <tbody>
@@ -49,11 +50,12 @@
                 <td class="py-2 pr-3">{{ "%.2f"|format(s.confidence) }}</td>
                 <td class="py-2 pr-3">{% if s.verifier_agrees %}agree{% else %}disagree{% endif %} ({{ "%.2f"|format(s.verifier_confidence) }})</td>
                 <td class="py-2 pr-3">{{ s.action }}</td>
+                <td class="py-2 pr-3 text-slate-400">{{ s.rejection_reason or "—" }}</td>
               </tr>
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="8" class="py-8 text-center text-slate-500 text-sm">
+              <td colspan="9" class="py-8 text-center text-slate-500 text-sm">
                 No signals yet — click <strong>Process candidates</strong> to analyse recent news.
               </td>
             </tr>
@@ -63,4 +65,3 @@
     </div>
   </div>
 {% endblock %}
-

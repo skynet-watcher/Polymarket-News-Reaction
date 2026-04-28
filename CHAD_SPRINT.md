@@ -3,6 +3,7 @@
 > Written by **Alex** (reviewer/architect), 2026-04-28.
 > Eric's goal: see real market matches, real signals, and real paper trades by morning.
 > Pull `main` before you start — several critical fixes landed today.
+> Latest review source: `ALEX_REVIEW.md`.
 
 ---
 
@@ -15,6 +16,8 @@
 3. **Backtest trade marking.** `PaperTrade.trade_source` is now `LIVE` or `BACKTEST`. Backtest cases now record `signal_action`.
 
 Full details: **Engineering Log** section in `README.md`.
+
+4. **Alex review first sprint partially executed.** Chad added `ALEX_REVIEW.md` locally, audited the data baseline, seeded a Research profile as the new default for fresh installs, added an LLM call/cost guard, added process-candidate funnel counters to the job response, and exposed rejection reasons on `/signals`.
 
 ---
 
@@ -151,6 +154,8 @@ Return these in the job response dict. Then surface them on System status alongs
 
 **Done when:** the `process_candidates` job result shows the funnel numbers, and at least one number is non-zero.
 
+**Status:** partial. Job response now includes `keyword_candidates_total`, `llm_screened`, `llm_passed`, `signals_skipped_duplicate`, `llm_calls_used`, `llm_calls_skipped`, `estimated_llm_input_tokens`, and `estimated_llm_input_cost_usd`. Dashboard shows cumulative estimated relevance-screen cost. Full System status payload display can wait for `/analysis/funnel`.
+
 ---
 
 ### B2. Signal funnel page at `/analysis/funnel`
@@ -179,6 +184,8 @@ Query: aggregate from `news_articles`, `news_signals`, `paper_trades` by day.
 The signals page currently shows `action` but not `rejection_reason`. Add a tooltip or expandable column showing why a signal was ABSTAIN / REJECT_*. This is the fastest way to see if the gating thresholds are too tight.
 
 **Done when:** rejection reasons are visible on `/signals` for at least one rejected signal.
+
+**Status:** done locally by Chad; `/signals` now has a `reason` column.
 
 ---
 
@@ -250,6 +257,37 @@ In `app/threshold_profiles_seed.py` (or wherever profiles are seeded), add:
 
 **Done when:** `research` appears in the Settings threshold profile dropdown. Switch to it, run `process_candidates`, see more ACT signals.
 
+**Status:** done locally by Chad for new installs: `research` is seeded and is the default profile id. Existing databases keep their selected profile until changed in Settings.
+
+---
+
+## Block E — Alex review follow-up
+
+### E1. Data integrity audit
+
+Baseline from local `data.db` after reading `ALEX_REVIEW.md`:
+
+- `price_snapshots`: 6 total, all `smoke_mkt`
+- Real non-fixture snapshots: 0
+- Tokenized active real markets: 2
+- `news_signals`: 225 total, 224 `ABSTAIN`, 1 `ACT`
+- `paper_trades`: 0
+
+**Decision needed:** tag/truncate pre-fix lag/backtest rows before treating analytics as research data. Until then, pre-fix lag/backtest output is contaminated by fixture-only price history.
+
+### E2. Wire real settlement
+
+Next code task. `settle_trades.py` already settles on `Market.winning_outcome` at 0/1, but the adapter layer is not wired and most adapters are stubs. Implement a minimal safe bridge:
+
+- Prefer `Market.winning_outcome` from Gamma for binary closed markets.
+- Add `PaperTrade.resolution_source` and statuses `SETTLED_WIN` / `SETTLED_LOSS`.
+- Add the P&L truth integration test from `ALEX_REVIEW.md`.
+- Only then decide whether/how `ResolutionSourceMapping` should instantiate adapters.
+
+### E3. Full funnel page
+
+Build `/analysis/funnel` after E2 or in parallel if settlement is blocked. Use daily aggregates plus rejection breakdown to show where paper trades are dropping.
+
 ---
 
 ### D2. Verify end-to-end: article → signal → trade
@@ -306,6 +344,7 @@ Update **Chad — completed** at the bottom with date + one line per item. Push 
 - **2026-04-28 —** Hands-off realtime paper: `REALTIME_PAPER_QUICKSTART`, `make run-realtime`, README runbook/soak/SSE/proxy, snapshot loop heartbeat, async lag backfill, `GET /api/export/summary`, System status shows last job duration + row links, dashboard JS parity.
 - **2026-04-28 —** Phase 1 news reaction backtester: `BacktestRun`, `BacktestCase`, `BacktestEventLog`, `POST /api/jobs/backtest_news_reactions`, `/analysis/backtests`, JSONL audit logs. 52 tests pass.
 - **2026-04-28 —** No-paper-trades diagnosis: real markets still had JSON `null` token IDs; `sync_markets` now reads Gamma `clobTokenIds`, existing SQLite DBs backfill backtest trade columns, `/trades` badges BACKTEST rows, and `/analysis/backtests` supports run/action filtering.
+- **2026-04-28 —** Alex review sprint start: added `ALEX_REVIEW.md`, documented the fixture-only data baseline, added Research threshold profile, LLM relevance-call cap/cost telemetry, process-candidate funnel counters, dashboard LLM cost, and `/signals` rejection reasons.
 
 ---
 

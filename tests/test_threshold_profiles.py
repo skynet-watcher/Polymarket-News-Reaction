@@ -31,7 +31,7 @@ def test_ensure_default_inserts_three_profiles() -> None:
             n = (await session.execute(select(func.count()).select_from(ThresholdProfile))).scalar_one()
             assert int(n) == len(DEFAULT_PROFILES)
             ids = (await session.execute(select(ThresholdProfile.id))).scalars().all()
-            assert set(ids) == {"conservative", "balanced", "aggressive"}
+            assert set(ids) == {"conservative", "balanced", "aggressive", "research"}
         async with Session() as session:
             await ensure_default_threshold_profiles(session)
             n2 = (await session.execute(select(func.count()).select_from(ThresholdProfile))).scalar_one()

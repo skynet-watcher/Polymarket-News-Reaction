@@ -50,6 +50,8 @@ class Market(Base):
     market_type: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
     is_control_market: Mapped[bool] = mapped_column(Boolean, default=False)
     manipulation_risk_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Offline / demo rows (fixture JSON); excluded from headline analytics / lag aggregates.
+    is_fixture: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
     updated_at: Mapped[dt.datetime] = mapped_column(

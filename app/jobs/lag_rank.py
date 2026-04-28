@@ -28,7 +28,16 @@ async def run(session: AsyncSession) -> dict[str, Any]:
     Higher combined_score => slower-to-update (more interesting for research).
     """
     market_ids = list(
-        (await session.execute(select(LagMeasurement.market_id).distinct())).scalars().all()
+        (
+            await session.execute(
+                select(LagMeasurement.market_id)
+                .distinct()
+                .join(Market, LagMeasurement.market_id == Market.id)
+                .where(Market.is_fixture.is_not(True))
+            )
+        )
+        .scalars()
+        .all()
     )
     if not market_ids:
         return {"markets_scored": 0}
@@ -39,7 +48,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
 
     for mid in market_ids:
         mkt = await session.get(Market, mid)
-        if mkt is None:
+        if mkt is None or mkt.is_fixture:
             continue
         if (mkt.liquidity or 0.0) < settings.lag_rank_min_liquidity:
             continue

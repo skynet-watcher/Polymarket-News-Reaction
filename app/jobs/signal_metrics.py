@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,6 +85,7 @@ async def run_backfill(session: AsyncSession, *, limit: int = 100) -> dict[str, 
         .join(NewsArticle, NewsArticle.id == NewsSignal.article_id)
         .join(Market, Market.id == NewsSignal.market_id)
         .where(NewsSignal.action == "ACT")
+        .where(Market.is_fixture.is_not(True))
         .order_by(NewsSignal.created_at.desc())
         .limit(limit)
     )

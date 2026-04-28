@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import math
 import time
 from typing import Any, Optional
 
@@ -142,6 +143,14 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             "lag_focus_top_n": await _lag_focus_top_n(session),
             "threshold_profile_id": tctx.profile_id,
             "threshold_profile_label": tctx.profile_label,
+            "keyword_candidates_total": 0,
+            "llm_screened": 0,
+            "llm_passed": 0,
+            "signals_skipped_duplicate": 0,
+            "llm_calls_used": 0,
+            "llm_calls_skipped": 0,
+            "estimated_llm_input_tokens": 0,
+            "estimated_llm_input_cost_usd": 0.0,
         }
 
     focus_n = await _lag_focus_top_n(session)
@@ -186,6 +195,13 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         ).scalars().all()
 
     signals_created = 0
+    keyword_candidates_total = 0
+    llm_screened = 0
+    llm_passed = 0
+    llm_calls_used = 0
+    llm_calls_skipped = 0
+    signals_skipped_duplicate = 0
+    estimated_llm_input_tokens = 0
     t_match = time.perf_counter()
 
     for article in articles:
@@ -197,12 +213,30 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         )
         # Cap before LLM to bound token spend.
         kw_candidates = kw_candidates[: settings.matcher_keyword_max_candidates]
+        keyword_candidates_total += len(kw_candidates)
 
         if not kw_candidates:
             continue
 
         # ── Stage 2: batch LLM relevance screen ──────────────────────────────
         candidate_markets = [c["market"] for c in kw_candidates]
+        planned_calls = math.ceil(len(candidate_markets) / max(1, settings.matcher_llm_batch_size))
+        if settings.openai_api_key and settings.max_llm_calls_per_run >= 0:
+            remaining_calls = max(0, settings.max_llm_calls_per_run - llm_calls_used)
+            if remaining_calls <= 0:
+                llm_calls_skipped += planned_calls
+                continue
+            allowed_markets = remaining_calls * max(1, settings.matcher_llm_batch_size)
+            if len(candidate_markets) > allowed_markets:
+                skipped_markets = len(candidate_markets) - allowed_markets
+                candidate_markets = candidate_markets[:allowed_markets]
+                kw_candidates = kw_candidates[:allowed_markets]
+                llm_calls_skipped += math.ceil(skipped_markets / max(1, settings.matcher_llm_batch_size))
+        llm_screened += len(candidate_markets)
+        if settings.openai_api_key:
+            calls_for_article = math.ceil(len(candidate_markets) / max(1, settings.matcher_llm_batch_size))
+            llm_calls_used += calls_for_article
+            estimated_llm_input_tokens += _estimate_relevance_tokens(article, candidate_markets)
         # Build a quick lookup so we can join LLM scores back to keyword scores.
         kw_by_market_id = {c["market"].id: c for c in kw_candidates}
 
@@ -215,6 +249,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             score = result["score"]
             if score < settings.matcher_llm_min_relevance:
                 continue
+            llm_passed += 1
             kw = kw_by_market_id.get(mid)
             if kw is None:
                 continue
@@ -233,6 +268,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
                 )
             ).scalar_one_or_none()
             if existing is not None:
+                signals_skipped_duplicate += 1
                 continue
 
             sig = NewsSignal(
@@ -261,6 +297,9 @@ async def run(session: AsyncSession) -> dict[str, Any]:
     signals_processed = sum(r["processed"] for r in results)
     trades_created = sum(r["trades"] for r in results)
     duration_ms = int((time.perf_counter() - t_run) * 1000)
+    estimated_cost = round((estimated_llm_input_tokens / 1_000_000.0) * 0.15, 6)
+    await _increment_runtime_float(session, "llm_estimated_input_cost_usd_total", estimated_cost)
+    await _increment_runtime_int(session, "llm_relevance_calls_total", llm_calls_used)
 
     logger.info(
         "process_candidates done articles=%s created=%s processed=%s trades=%s duration_ms=%s match_ms=%s llm_ms=%s concurrency=%s",
@@ -287,4 +326,50 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         "lag_focus_top_n": focus_n,
         "threshold_profile_id": tctx.profile_id,
         "threshold_profile_label": tctx.profile_label,
+        "keyword_candidates_total": keyword_candidates_total,
+        "llm_screened": llm_screened,
+        "llm_passed": llm_passed,
+        "signals_skipped_duplicate": signals_skipped_duplicate,
+        "llm_calls_used": llm_calls_used,
+        "llm_calls_skipped": llm_calls_skipped,
+        "estimated_llm_input_tokens": estimated_llm_input_tokens,
+        "estimated_llm_input_cost_usd": estimated_cost,
     }
+
+
+def _estimate_relevance_tokens(article: NewsArticle, markets: list[Market]) -> int:
+    """Rough input-token estimate for cost telemetry; not billing-grade."""
+    chars = len(article.title or "") + min(len(article.body or ""), 600)
+    chars += sum(len(m.question or "") + len(str(m.id)) + 16 for m in markets)
+    chars += 700
+    return max(1, math.ceil(chars / 4))
+
+
+async def _increment_runtime_float(session: AsyncSession, key: str, amount: float) -> None:
+    if amount <= 0:
+        return
+    row = await session.get(RuntimeSetting, key)
+    current = 0.0
+    if row is not None:
+        try:
+            current = float(row.value or 0.0)
+        except ValueError:
+            current = 0.0
+        row.value = f"{current + amount:.6f}"
+    else:
+        session.add(RuntimeSetting(key=key, value=f"{amount:.6f}"))
+
+
+async def _increment_runtime_int(session: AsyncSession, key: str, amount: int) -> None:
+    if amount <= 0:
+        return
+    row = await session.get(RuntimeSetting, key)
+    current = 0
+    if row is not None:
+        try:
+            current = int(row.value or 0)
+        except ValueError:
+            current = 0
+        row.value = str(current + amount)
+    else:
+        session.add(RuntimeSetting(key=key, value=str(amount)))

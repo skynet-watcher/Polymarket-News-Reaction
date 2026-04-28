@@ -4,7 +4,7 @@ import datetime as dt
 import json
 from pathlib import Path
 from statistics import median
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -181,6 +181,7 @@ def _simulate_backtest_trade(
     notional_usd = settings.paper_trade_notional_usd
     entry_fee = round(notional_usd * settings.polymarket_entry_fee_rate, 4)
 
+    # ~1 tick slippage vs mid (ALEX_REVIEW L3): aligns directionally with live CLOB fill model; not a full depth walk.
     if outcome == "YES":
         fill = min(0.999, p0 + 0.01)
         side = "BUY_YES"
@@ -233,7 +234,7 @@ async def _build_case(
     run_id: str,
     signal: NewsSignal,
     min_snapshot_coverage: int,
-) -> tuple[BacktestCase, dict[str, Any]]:
+) -> tuple[BacktestCase, Optional[PriceSnapshot], dict[str, Any]]:
     article = signal.article
     market = signal.market
     if article is None:
@@ -396,7 +397,9 @@ async def run(
                 select(NewsSignal)
                 .options(selectinload(NewsSignal.article), selectinload(NewsSignal.market))
                 .join(NewsArticle, NewsArticle.id == NewsSignal.article_id)
+                .join(Market, Market.id == NewsSignal.market_id)
                 .where(NewsArticle.published_at >= cutoff)
+                .where(Market.is_fixture.is_not(True))
                 .order_by(desc(NewsArticle.published_at), desc(NewsSignal.created_at))
                 .limit(max(1, max_articles))
             )

@@ -1,4 +1,6 @@
 """
+**Experimental — not connected to live gating or the signal pipeline; research use only.**
+
 Market type classifier.
 
 Assigns a market_type string to a Market row based on its question text,

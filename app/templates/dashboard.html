@@ -38,6 +38,10 @@
       <span class="text-slate-400">Threshold profile</span>
       <span id="dash-threshold-profile" class="ml-2 text-slate-200" title="{{ threshold_profile_id }}">{{ threshold_profile_label }}</span>
     </div>
+    <div>
+      <span class="text-slate-400">LLM screen cost</span>
+      <span id="dash-llm-cost" class="ml-2 text-slate-200" title="{{ llm_relevance_calls_total }} relevance calls">${{ "%.4f"|format(llm_estimated_input_cost_usd_total) }}</span>
+    </div>
     {% if dashboard_sse_enabled %}
     <div class="text-xs text-slate-500">
       <span id="dash-live-indicator" class="inline-block w-2 h-2 rounded-full bg-green-500 align-middle mr-1"></span>
@@ -164,6 +168,7 @@
         var elNews = document.getElementById("dash-news-age");
         var elAct = document.getElementById("dash-act-24h");
         var elProf = document.getElementById("dash-threshold-profile");
+        var elCost = document.getElementById("dash-llm-cost");
         if (elSnap) {
           elSnap.textContent = d.last_snap_age_min + "m ago";
           elSnap.className = snapClass(d.last_snap_age_min);
@@ -173,6 +178,10 @@
         if (elProf) {
           elProf.textContent = d.threshold_profile_label;
           elProf.setAttribute("title", d.threshold_profile_id || "");
+        }
+        if (elCost) {
+          elCost.textContent = "$" + Number(d.llm_estimated_input_cost_usd_total || 0).toFixed(4);
+          elCost.setAttribute("title", String(d.llm_relevance_calls_total || 0) + " relevance calls");
         }
         if (d.counts) {
           document.querySelectorAll(".dash-count-val").forEach(function (node) {

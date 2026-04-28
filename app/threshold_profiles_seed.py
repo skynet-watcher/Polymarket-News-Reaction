@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ThresholdProfile
@@ -47,13 +47,25 @@ DEFAULT_PROFILES: list[dict] = [
         "allow_indirect_evidence": True,
         "paper_size_multiplier": 1.25,
     },
+    {
+        "id": "research",
+        "display_name": "Research",
+        "description": "High-recall paper research profile: looser confidence, indirect evidence allowed, four-hour article window.",
+        "min_liquidity": 500.0,
+        "max_spread": 0.15,
+        "min_relevance": 0.40,
+        "min_confidence": 0.55,
+        "min_verifier_confidence": 0.55,
+        "max_article_age_minutes": 240,
+        "allow_indirect_evidence": True,
+        "paper_size_multiplier": 0.5,
+    },
 ]
 
 
 async def ensure_default_threshold_profiles(session: AsyncSession) -> None:
-    cnt = (await session.execute(select(func.count()).select_from(ThresholdProfile))).scalar_one()
-    if int(cnt or 0) > 0:
-        return
+    existing_ids = set((await session.execute(select(ThresholdProfile.id))).scalars().all())
     for row in DEFAULT_PROFILES:
-        session.add(ThresholdProfile(**row))
+        if row["id"] not in existing_ids:
+            session.add(ThresholdProfile(**row))
     await session.commit()

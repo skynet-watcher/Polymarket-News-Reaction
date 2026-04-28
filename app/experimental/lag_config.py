@@ -1,4 +1,6 @@
 """
+**Experimental — not connected to live gating or the signal pipeline; research use only.**
+
 Lag configuration: per-category observation windows.
 
 CATEGORY_OBSERVATION_HOURS controls how far forward from signal_time the lag

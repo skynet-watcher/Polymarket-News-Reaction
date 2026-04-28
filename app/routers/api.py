@@ -18,7 +18,7 @@ from app.jobs import backtest_news_reactions, compute_lag, lag_rank, process_can
 from app.live_feeds import ensure_live_news_sources
 from sqlalchemy import desc, select
 
-from app.models import LagMeasurement, LagThresholdCrossing, SignalDriftWindow
+from app.models import LagMeasurement, LagThresholdCrossing, Market, SignalDriftWindow
 
 
 router = APIRouter()
@@ -184,7 +184,11 @@ async def get_lag_measurements(
     Returns lag measurements with their drift windows and crossings.
     Intended for dashboard use; stable-enough JSON for review.
     """
-    q = select(LagMeasurement)
+    q = (
+        select(LagMeasurement)
+        .join(Market, LagMeasurement.market_id == Market.id)
+        .where(Market.is_fixture.is_not(True))
+    )
     if category is not None:
         q = q.where(LagMeasurement.category == category)
     if implied_outcome is not None:

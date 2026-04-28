@@ -493,6 +493,7 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
         snapshotted = 0
         clob_attempted = 0
         clob_skipped = 0
+        is_fixture_market = markets_source == "fixture"
 
         for rm in raw_markets:
             market_id = str(rm.get("id") or rm.get("market_id") or "").strip()
@@ -560,6 +561,7 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
                     resolution_source_text=resolution_source_text,
                     rules_text=rules_text,
                     enable_orderbook=enable_ob,
+                    is_fixture=is_fixture_market,
                 )
                 session.add(m)
                 upserted += 1
@@ -587,6 +589,7 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
                 if rules_text is not None:
                     existing.rules_text = rules_text
                 existing.enable_orderbook = enable_ob
+                existing.is_fixture = is_fixture_market
                 upserted += 1
 
             if enable_ob and (best_bid is not None or best_ask is not None):

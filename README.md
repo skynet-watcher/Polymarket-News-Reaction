@@ -1,6 +1,6 @@
 ## Polymarket News-Reaction (Paper Trading MVP)
 
-Sprint tasks for Chad: see [`CHAD_SPRINT.md`](CHAD_SPRINT.md) (includes a **solo overnight** checklist). Status UI / Lucy notes: [`LUCY_STATUS_UI_HANDOFF.md`](LUCY_STATUS_UI_HANDOFF.md). Source repo: [github.com/skynet-watcher/Polymarket-News-Reaction](https://github.com/skynet-watcher/Polymarket-News-Reaction).
+Sprint tasks for Chad: see [`CHAD_SPRINT.md`](CHAD_SPRINT.md) and [`ALEX_REVIEW.md`](ALEX_REVIEW.md). Status UI / Lucy notes: [`LUCY_STATUS_UI_HANDOFF.md`](LUCY_STATUS_UI_HANDOFF.md). Source repo: [github.com/skynet-watcher/Polymarket-News-Reaction](https://github.com/skynet-watcher/Polymarket-News-Reaction).
 
 ---
 
@@ -8,6 +8,20 @@ Sprint tasks for Chad: see [`CHAD_SPRINT.md`](CHAD_SPRINT.md) (includes a **solo
 
 > Maintained by **Alex** (reviewer/architect). Most recent entry first.
 > Chad and Lucy: read this before starting new work — it covers bugs fixed, architectural decisions, and things that look wrong but aren't.
+
+---
+
+### 2026-04-28 — Alex review sprint: clean data, Research profile, LLM guard
+
+**Data baseline:** Current local `data.db` has only `smoke_mkt` price snapshots before the CLOB token fix. Treat pre-fix lag/backtest analytics as contaminated fixture data. At the time of Chad's audit: real snapshot count was `0`, tokenized active real markets were `2`, signals were `225` (`224 ABSTAIN`, `1 ACT`), and paper trades were `0`.
+
+**Research profile:** `research` is now seeded as the default profile for new installs: indirect evidence allowed, `min_confidence = 0.55`, `min_verifier_confidence = 0.55`, `max_article_age_minutes = 240`, half-size paper trades. Existing DBs that already selected another profile keep their setting until changed in Settings.
+
+**Cost guard:** `process_candidates` now has `MAX_LLM_CALLS_PER_RUN` (default `50`) and returns funnel/cost fields: keyword candidates, LLM screened/passed, duplicate skips, calls used/skipped, estimated input tokens, and estimated input cost. Dashboard shows cumulative estimated LLM screen cost.
+
+**UI diagnostics:** `/signals` now shows `rejection_reason` so you can see whether the system is blocked by evidence, confidence, age, spread, liquidity, or orderbook gaps.
+
+**Still next:** wire real resolution settlement and add the full `/analysis/funnel` page.
 
 ---
 
@@ -236,6 +250,7 @@ That **caps** RSS poll (≤120s), candidate processing (≤60s), full Gamma snap
 | `REALTIME_PAPER_QUICKSTART` | `1` = faster cadence (see above). |
 | `BACKGROUND_*_INTERVAL_SECONDS` | `0` disables that background loop; see `.env.example`. |
 | `LLM_MAX_CONCURRENCY` | Parallel candidate workers; set `1` if you see `database is locked`. |
+| `MAX_LLM_CALLS_PER_RUN` | Hard cap on GPT relevance-screen calls per candidate run (default **50**). |
 | `SYNC_CLOB_SNAPSHOT_LIMIT` | Max CLOB orderbook probes per full market sync (default **50**) so Sync markets stays bounded. |
 | `CLOB_ORDERBOOK_TIMEOUT_SECONDS` | Per-orderbook timeout during snapshot sync (default **5s**). |
 | `TRADING_ENABLED` | Must stay `false` for this MVP (paper only). |

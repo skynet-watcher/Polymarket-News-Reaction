@@ -128,6 +128,7 @@ def test_sync_run_persists_winning_outcome_from_closed_fetch():
             assert row.closed is True
             assert row.winning_outcome == "NO"
             assert row.active is False
+            assert row.is_fixture is False
         finally:
             await session.close()
             await engine.dispose()
@@ -210,6 +211,7 @@ def test_sync_run_falls_back_to_fixture_when_gamma_returns_http_error():
             assert src is not None and src.value == "fixture"
             demo = (await session.execute(select(Market).where(Market.id == "demo_mkt_1"))).scalar_one_or_none()
             assert demo is not None
+            assert demo.is_fixture is True
         finally:
             await session.close()
             await engine.dispose()
