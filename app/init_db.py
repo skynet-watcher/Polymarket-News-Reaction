@@ -13,6 +13,22 @@ async def init_db(engine: AsyncEngine) -> None:
         # (SQLAlchemy create_all does not alter existing tables.)
         await _ensure_column(conn, table="price_snapshots", column="spread", ddl="ALTER TABLE price_snapshots ADD COLUMN spread FLOAT")
         await _ensure_column(conn, table="price_snapshots", column="volume_24h", ddl="ALTER TABLE price_snapshots ADD COLUMN volume_24h FLOAT")
+        # Data-quality flag: snapshots before the tokenId fix (2026-04-28T04:37:35Z) were captured
+        # when real markets had null token_ids_json, so CLOB orderbook data was never fetched —
+        # only the smoke_mkt fixture produced valid snapshots before this cutover.
+        await _ensure_column(
+            conn,
+            table="price_snapshots",
+            column="data_quality",
+            ddl="ALTER TABLE price_snapshots ADD COLUMN data_quality VARCHAR DEFAULT 'OK'",
+        )
+        try:
+            await conn.execute(text(
+                "UPDATE price_snapshots SET data_quality = 'PRE_TOKENID_FIX'"
+                " WHERE data_quality = 'OK' AND timestamp < '2026-04-28 04:37:35'"
+            ))
+        except Exception:
+            pass
         await _ensure_column(conn, table="lag_measurements", column="eventual_move", ddl="ALTER TABLE lag_measurements ADD COLUMN eventual_move FLOAT")
         await _ensure_column(conn, table="markets", column="winning_outcome", ddl="ALTER TABLE markets ADD COLUMN winning_outcome VARCHAR")
         await _ensure_column(conn, table="lag_measurements", column="signal_correct", ddl="ALTER TABLE lag_measurements ADD COLUMN signal_correct BOOLEAN")
@@ -62,6 +78,12 @@ async def init_db(engine: AsyncEngine) -> None:
             table="paper_trades",
             column="backtest_case_id",
             ddl="ALTER TABLE paper_trades ADD COLUMN backtest_case_id VARCHAR",
+        )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="settlement_source",
+            ddl="ALTER TABLE paper_trades ADD COLUMN settlement_source VARCHAR",
         )
         await _ensure_column(
             conn,

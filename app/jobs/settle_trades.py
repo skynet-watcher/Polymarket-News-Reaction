@@ -81,6 +81,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             pnl = (resolution_price - trade.fill_price) * trade.simulated_size
             _apply_settlement_pnl(trade, gross_pnl_usd=pnl)
             trade.status = "SETTLED_RESOLVED"
+            trade.settlement_source = "GAMMA_WINNING_OUTCOME"
             settled += 1
             continue
 
@@ -118,6 +119,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
 
         _apply_settlement_pnl(trade, gross_pnl_usd=pnl)
         trade.status = "SETTLED_T24H"
+        trade.settlement_source = "T24H_MARK_TO_MARKET"
         settled += 1
 
     await session.commit()

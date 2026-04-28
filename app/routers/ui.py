@@ -481,14 +481,17 @@ async def laggy_markets_page(request: Request, session: AsyncSession = Depends(g
 async def health_check(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
     now = now_utc()
 
-    # Gate 1: Real price data flowing (exclude fixture / demo markets via is_fixture flag)
+    # Gate 1: Real price data flowing — exclude fixture markets and pre-fix snapshots
+    # (snapshots before 2026-04-28T04:37:35Z were captured when CLOB token IDs were null)
     not_fixture = Market.is_fixture.is_not(True)
+    good_quality = func.coalesce(PriceSnapshot.data_quality, "OK") != "PRE_TOKENID_FIX"
     real_snap_count = (
         await session.execute(
             select(func.count())
             .select_from(PriceSnapshot)
             .join(Market, Market.id == PriceSnapshot.market_id)
             .where(not_fixture)
+            .where(good_quality)
         )
     ).scalar_one() or 0
 
@@ -498,6 +501,7 @@ async def health_check(request: Request, session: AsyncSession = Depends(get_ses
             .select_from(PriceSnapshot)
             .join(Market, Market.id == PriceSnapshot.market_id)
             .where(not_fixture)
+            .where(good_quality)
         )
     ).scalar_one() or 0
 

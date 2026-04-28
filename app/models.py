@@ -257,6 +257,9 @@ class PaperTrade(Base):
     # Paper execution audit: ladder summary, partial fill, rejection codes, book depth snapshot.
     execution_context_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
+    # How this trade was settled: GAMMA_WINNING_OUTCOME | T24H_MARK_TO_MARKET | None (unsettled)
+    settlement_source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
     # LIVE = created by the real-time signal pipeline.
     # BACKTEST = simulated by backtest_news_reactions for a missed or counterfactual trade.
     # Legacy rows default to LIVE (they were all created by the live pipeline).
@@ -287,6 +290,8 @@ class PriceSnapshot(Base):
     spread: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # best_ask_yes - best_bid_yes
     liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     volume_24h: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # OK = usable  |  PRE_TOKENID_FIX = captured before 2026-04-28T04:37:35Z (CLOB was broken)
+    data_quality: Mapped[str] = mapped_column(String, default="OK")
 
     market: Mapped["Market"] = relationship(back_populates="snapshots")
 
