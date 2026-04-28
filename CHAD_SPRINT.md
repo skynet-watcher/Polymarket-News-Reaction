@@ -1,151 +1,301 @@
-# Chad — next sprint backlog (big job list)
+# Chad — Sprint: Real Data by Tomorrow
 
-Lucy is handing this off: **you own execution**; items below are suggestions, priorities, and acceptance hints. Reorder as you like.
-
----
-
-## Solo overnight (no Cursor / no Lucy)
-
-Use this if you are heads-down and only have the repo + terminal.
-
-1. **Repo:** `https://github.com/skynet-watcher/Polymarket-News-Reaction.git` — `git pull` on `main` before you start.
-2. **Env:** `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt` — copy `.env.example` → `.env` and set at least `OPENAI_API_KEY` (optional but recommended for signals).
-3. **Run:** `make run` (token-light defaults) or `make run-realtime` (faster paper cadence) — listens on `0.0.0.0:8000`. Quick checks: `curl -s http://127.0.0.1:8000/healthz` and open `/` for **System status**; optional `curl -s http://127.0.0.1:8000/api/export/summary`.
-4. **If the app misbehaves:** see **Quickstart** + “Next steps” in root `README.md`; threshold tuning in **Settings**; SQLite lock → set `LLM_MAX_CONCURRENCY=1` in `.env` and restart (also in README).
-5. **Before you commit:** `make test` (expect **44+** passed). Do **not** commit `.env`, `*.db*`, or `Keys/` (they are gitignored).
-6. **Context on the dashboard / jobs:** `LUCY_STATUS_UI_HANDOFF.md` (behavior + endpoints). **Your backlog** stays in *this* file.
+> Written by **Alex** (reviewer/architect), 2026-04-28.
+> Eric's goal: see real market matches, real signals, and real paper trades by morning.
+> Pull `main` before you start — several critical fixes landed today.
 
 ---
 
-## P0 — Unblock “real repo” and shared truth
+## Context: what just changed (read this first)
 
-1. **Restore a valid git checkout**  
-   - Replace or repair `.git` so `git status`, `git pull`, and `git push` work.  
-   - **Done when:** another dev can clone and run `make run` from `main` (or your agreed default branch).  
-   - **Status:** done for `main` at [Polymarket-News-Reaction](https://github.com/skynet-watcher/Polymarket-News-Reaction) — see *Chad — completed* below.
+1. **tokenIds bug fixed.** Every real Polymarket market had `token_ids_json = null` — CLOB price fetches silently skipped, zero snapshots ever written for real markets. Fixed in commit `8e53418`. First sync after pulling will populate token IDs and snapshots will start flowing.
 
-2. **Single “source of truth” for handoff**  
-   - Keep `LUCY_STATUS_UI_HANDOFF.md` + this file; delete stale duplicates if any appear.  
-   - Add a one-line pointer in root `README.md`: “See `CHAD_SPRINT.md` for current sprint tasks.”
+2. **Two-stage matcher deployed.** Keyword pre-filter at 0.15 threshold + batched LLM relevance screen. Signals were near-zero before; should be much higher now.
 
-3. **CI smoke (minimal)**  
-   - GitHub Actions (or similar): `pip install -r requirements.txt`, `pytest`, optional `ruff`/`mypy` if you add configs.  
-   - **Done when:** PRs get a green check without manual ritual.
+3. **Backtest trade marking.** `PaperTrade.trade_source` is now `LIVE` or `BACKTEST`. Backtest cases now record `signal_action`.
+
+Full details: **Engineering Log** section in `README.md`.
 
 ---
 
-## P0 — Ops / runbook (hands-off paper MVP)
+## Sprint shape
 
-4. **Production-ish runbook (expand README)**  
-   - Document: required vs optional env vars, `.env` example **without secrets**, `make run` vs `make run-dev`, where `data.db` lives, backup/restore SQLite, “first hour” checklist.  
-   - **Done when:** Eric can follow README only and get a stable dashboard.
+| Block | When | Hours |
+|---|---|---|
+| **Block A: Health check + source expansion** | First thing, tonight | ~2h |
+| **Block B: Signal funnel UI** | After A | ~2h |
+| **Block C: UI polish (backtest + trades)** | After B | ~2h |
+| **Block D: Research profile + threshold tuning** | After C | ~1h |
 
-5. **Long-run soak protocol**  
-   - 4–24h run template: what to watch on System status, log files, disk growth, when to restart.  
-   - Capture **one** real incident + resolution (e.g. `database is locked`, cancel during lag backfill).
-
-6. **Job duration visibility**  
-   - Surface **last duration** or “slow job” warning for `lag_backfill` / `process_candidates` (even a JSON field or extra row in System status). Helps explain yellow/red.
+If you only have 4 hours: do **A** completely, then **B**, then whatever of **C** fits.
 
 ---
 
-## P1 — UX / UI polish
+## Block A — Health check + news source expansion
 
-7. **Lag backfill: don’t block the browser**  
-   - **Status:** `POST /api/lag-measurements/backfill` now queues work via FastAPI `BackgroundTasks` and returns immediately; use System status to watch `lag_backfill`.  
-   - **Done when:** user never has to keep a tab open for 10+ minutes for a routine backfill.
+### A1. Pull, restart, verify snapshots are flowing
 
-8. **System status: link to drill-down**  
-   - Each row links to the relevant page (`/news`, `/signals`, `/analysis/lags`, etc.) or pre-filtered view.
+```bash
+git pull origin main
+make run   # or make run-realtime for faster cadence
+```
 
-9. **Empty states**  
-   - Laggy markets, lags analysis, soft accuracy: short copy when `0` rows (“Run backfill after you have ACT signals…”).
+Then from the dashboard or curl:
+```bash
+# Trigger a fresh sync
+curl -s -X POST http://127.0.0.1:8000/api/jobs/sync_markets
 
-10. **Settings: grouped sections + “danger zone”**  
-    - Threshold profile, lag focus, feeds, mappings — collapsible or anchored headings.
+# Wait ~30s, then check snapshot count (should be > 6 and growing)
+sqlite3 data.db "SELECT COUNT(*), MAX(timestamp) FROM price_snapshots WHERE id NOT LIKE '%smoke%';"
 
----
+# Check that token IDs are now populated
+sqlite3 data.db "SELECT COUNT(*) FROM markets WHERE token_ids_json IS NOT NULL AND active=1 AND closed=0;"
+```
 
-## P1 — Reliability / data quality
-
-11. **SQLite under parallel LLM**  
-    - Document `LLM_MAX_CONCURRENCY=1` for flaky setups; consider queue-based candidate processing later (out of scope unless you want it).
-
-12. **Idempotent / safe RSS**  
-    - Lucy added URL dedupe vs shifting `published_at`; add a **regression test** that mirrors a real Guardian URL if you have a fixture dump.
-
-13. **Market sync staleness**  
-    - If snapshot loop fails silently, System status goes stale — add **heartbeat** log line or counter every N ticks so logs prove the loop is alive.
-
-14. **Failed job “Retry” affordance**  
-    - One-click POST from UI for the failed job name (or copyable `curl`).
+**Done when:** snapshot count for non-fixture markets is growing after each sync.
 
 ---
 
-## P2 — Observability
+### A2. Reactivate Reuters + fix source tiers
 
-15. **Structured logging**  
-    - JSON logs optional via env; include `job_name`, `duration_ms`, `outcome` for background loops.
+Reuters is in the DB but disabled (`active=0`) and tagged `WIRE` (old tier, not recognised by the matcher). Fix via the Settings UI or directly:
 
-16. **Export**  
-    - `GET /api/system-status` already exists; add `GET /api/export/summary` (counts + last success per job) for Eric to paste into notes.
+```bash
+sqlite3 data.db "UPDATE news_sources SET active=1, source_tier='HARD' WHERE domain='reuters.com';"
+```
 
-17. **SSE / proxy doc**  
-    - Short nginx/Caddy snippet: `proxy_buffering off` for `/api/stream/dashboard`, timeouts.
+Also tag AP and Bloomberg if/when added as `HARD` — these are authoritative wires that should get higher weight in the lag module later.
 
----
-
-## P2 — Product / research
-
-18a. **News reaction backtester**
-    - Phase 1 local snapshots only: measure publication→fetch/system delay and post-publication market movement.
-    - **Status:** implemented locally for review: `BacktestRun`, `BacktestCase`, `BacktestEventLog`, `POST /api/jobs/backtest_news_reactions`, `/analysis/backtests`, and JSONL audit logs under `logs/backtests/`.
-
-18. **Laggy markets: explain the score**  
-    - Tooltip or `/analysis/laggy-markets` paragraph: what `combined_score` means, data prerequisites.
-
-19. **Threshold profile presets in UI**  
-    - Read-only table of numeric columns for `conservative` / `balanced` / `aggressive` so users don’t have to read seed code.
-
-20. **Paper PnL sanity**  
-    - On `/trades`, flag OPEN trades with no snapshot in X hours; link to “sync markets”.
+**Done when:** Reuters shows `active=1` and `source_tier='HARD'` in the Settings sources list.
 
 ---
 
-## P3 — Future (don’t start unless P0–P1 clear)
+### A3. Add high-signal news sources
 
-21. **Postgres option**  
-    - Docker-compose + `DATABASE_URL` for multi-writer / fewer SQLite edge cases.
+Current sources are mostly general world news. Polymarket skews heavily toward US politics, crypto, finance, and sports. Add these — all have reliable RSS feeds:
 
-22. **Auth on admin routes**  
-    - If exposing beyond LAN: API key or basic auth on `POST /api/jobs/*`.
+**Must-add (high overlap with Polymarket market universe):**
 
-23. **Real execution**  
-    - Explicitly **not** this sprint; keep `trading_enabled` false until audit + execution design exists.
+| Source | Domain | RSS URL | Tier |
+|---|---|---|---|
+| Associated Press | apnews.com | `https://feeds.apnews.com/rss/topnews` | `HARD` |
+| AP — Politics | apnews.com | `https://feeds.apnews.com/rss/politics` | `HARD` |
+| AP — Business | apnews.com | `https://feeds.apnews.com/rss/business` | `HARD` |
+| CNBC — Top News | cnbc.com | `https://www.cnbc.com/id/100003114/device/rss/rss.html` | `SOFT` |
+| ESPN — Top Headlines | espn.com | `https://www.espn.com/espn/rss/news` | `SOFT` |
+| Crypto Slate | cryptoslate.com | `https://cryptoslate.com/feed/` | `SOFT` |
+| CoinDesk | coindesk.com | `https://www.coindesk.com/arc/outboundfeeds/rss/` | `SOFT` |
+| The Hill | thehill.com | `https://thehill.com/feed/` | `SOFT` |
+| Fox News — Politics | foxnews.com | `https://feeds.foxnews.com/foxnews/politics` | `SOFT` |
+
+**Add via Settings UI** (Sources section) or insert directly:
+```sql
+INSERT OR IGNORE INTO news_sources (name, domain, rss_url, source_tier, polling_interval_minutes, active)
+VALUES
+  ('AP — Top News',    'apnews.com',      'https://feeds.apnews.com/rss/topnews',              'HARD', 5, 1),
+  ('AP — Politics',   'apnews.com',      'https://feeds.apnews.com/rss/politics',              'HARD', 5, 1),
+  ('AP — Business',   'apnews.com',      'https://feeds.apnews.com/rss/business',              'HARD', 5, 1),
+  ('CNBC',            'cnbc.com',        'https://www.cnbc.com/id/100003114/device/rss/rss.html','SOFT', 5, 1),
+  ('ESPN',            'espn.com',        'https://www.espn.com/espn/rss/news',                 'SOFT', 10, 1),
+  ('CoinDesk',        'coindesk.com',    'https://www.coindesk.com/arc/outboundfeeds/rss/',    'SOFT', 5, 1),
+  ('CryptoSlate',     'cryptoslate.com', 'https://cryptoslate.com/feed/',                      'SOFT', 5, 1),
+  ('The Hill',        'thehill.com',     'https://thehill.com/feed/',                          'SOFT', 5, 1),
+  ('Fox News Politics','foxnews.com',    'https://feeds.foxnews.com/foxnews/politics',         'SOFT', 5, 1);
+```
+
+> **Note:** some of these feeds may have moved or rate-limit aggressively. Test each with `curl -I <rss_url>` first. If a feed returns 4xx, skip it and note it here.
+
+**Also check:** `apnews.com` appears twice in the insert (same domain, different paths). SQLite's `UNIQUE` constraint is on `domain`, so only the first AP row will insert. If you want multiple AP feeds, you'll need to either relax that constraint or use subdomains. For now, just use the top-news feed — it's the most comprehensive.
+
+**Done when:** `SELECT COUNT(*) FROM news_sources WHERE active=1;` returns 15+, and a `poll_news` run inserts new articles.
 
 ---
 
-## Suggested sprint shape
+### A4. Verify Gamma near-resolution params
 
-- **Week 1 focus:** items **1–6** + **7** + **14**.  
-- **Week 2 focus:** **8–13**, **15–16**.  
-- **Ongoing:** **18–20** as filler.
+`_fetch_near_resolution_markets` in `sync_markets.py` passes `end_date_min` and `end_date_max` to Gamma. These are guessed param names — verify they work:
+
+```bash
+# Check if the sweep is returning anything after sync
+sqlite3 data.db "
+  SELECT COUNT(*) FROM markets
+  WHERE end_date <= datetime('now', '+48 hours')
+  AND end_date >= datetime('now')
+  AND active=1 AND closed=0;"
+```
+
+If count is 0 after a sync, the params are wrong. Check the Gamma `/markets` API and fix the param names in `_fetch_near_resolution_markets`. If you can't find the right params, comment out the `end_date_min`/`end_date_max` filter and instead post-filter results in Python — it's worth getting near-resolution markets even if we have to over-fetch.
+
+**Done when:** the above query returns > 0 markets after a sync.
 
 ---
 
-## When you finish a chunk
+## Block B — Signal funnel visibility
 
-- Move done items to a **“Chad — completed”** section at the bottom of this file (date + one line).  
-- Ping Eric / Lucy in chat: *“Chad sprint: closed items X,Y,Z in `CHAD_SPRINT.md`.”*
+Right now there's no way to see *where* signals are dropping off. We need a funnel view to diagnose whether the matcher, the LLM screen, or the gating is the bottleneck.
+
+### B1. Add match stats to `process_candidates` job response + System status
+
+In `process_candidates.py`, the `run()` function already returns `signals_created`, `signals_processed`, `trades_created`. Add:
+
+- `keyword_candidates_total` — sum of keyword stage candidates across all articles
+- `llm_screened` — total that passed to batch_relevance_screen
+- `llm_passed` — total that cleared `matcher_llm_min_relevance`
+- `signals_skipped_duplicate` — already-existing signals that were skipped
+
+Return these in the job response dict. Then surface them on System status alongside the existing counts.
+
+**Done when:** the `process_candidates` job result shows the funnel numbers, and at least one number is non-zero.
+
+---
+
+### B2. Signal funnel page at `/analysis/funnel`
+
+New page (small template, one query). Shows for the last 7 days:
+
+- Articles polled per day (bar chart or table)
+- Keyword candidates generated
+- LLM screen passes
+- Signals created
+- ACT / ABSTAIN / REJECT breakdown
+- Paper trades created
+
+This doesn't need to be pretty — a plain HTML table is fine. The goal is to see at a glance whether the pipeline is producing anything.
+
+Route: `GET /analysis/funnel`
+Template: `app/templates/funnel.html`
+Query: aggregate from `news_articles`, `news_signals`, `paper_trades` by day.
+
+**Done when:** `/analysis/funnel` loads and shows non-zero numbers.
+
+---
+
+### B3. Show rejection reasons on the signals page
+
+The signals page currently shows `action` but not `rejection_reason`. Add a tooltip or expandable column showing why a signal was ABSTAIN / REJECT_*. This is the fastest way to see if the gating thresholds are too tight.
+
+**Done when:** rejection reasons are visible on `/signals` for at least one rejected signal.
+
+---
+
+## Block C — UI polish (backtest + trades)
+
+### C1. `[BACKTEST]` badge on trades page
+
+`PaperTrade.trade_source` is `LIVE` or `BACKTEST`. On `/trades`, add a small muted badge:
+```html
+{% if trade.trade_source == 'BACKTEST' %}
+  <span class="badge badge-secondary">BACKTEST</span>
+{% endif %}
+```
+Link `backtest_case_id` to the relevant case on `/analysis/backtests` if it exists.
+
+**Done when:** backtest trades show a distinct badge; live trades show nothing different.
+
+---
+
+### C2. Backtest run selector
+
+The `/analysis/backtests` page already fetches `runs` but only shows the latest. Add a simple `<select>` or list on the page so you can view any past run's cases. The backend already passes `runs` to the template — it's template-only work.
+
+**Done when:** clicking a past run loads its cases.
+
+---
+
+### C3. `signal_action` filter on backtests
+
+Add a filter row or tab on `/analysis/backtests` for:
+- All cases
+- ACT (live trade was made)
+- Non-ACT (missed opportunities — most interesting for research)
+
+Use `BacktestCase.signal_action` which is now populated. Query-side, just add a `WHERE signal_action = ?` clause when the filter is selected.
+
+**Done when:** user can filter backtest cases to show only "missed" signals.
+
+---
+
+## Block D — Threshold tuning
+
+### D1. Add a "research" threshold profile
+
+The `conservative` profile (`min_confidence=0.90`, `min_verifier_confidence=0.85`) is correct for live paper trading but too tight to see research signals. Add a `research` profile in the seed/settings that lets more signals through for analysis without pretending they're high-quality trades.
+
+In `app/threshold_profiles_seed.py` (or wherever profiles are seeded), add:
+
+```python
+{
+    "id": "research",
+    "label": "Research (high recall, low precision)",
+    "min_liquidity": 500.0,
+    "max_spread": 0.15,
+    "min_relevance": 0.40,      # LLM screen already at 0.50; this is signal-level
+    "min_confidence": 0.60,
+    "min_verifier_confidence": 0.55,
+    "max_article_age_minutes": 120,
+    "allow_indirect_evidence": True,
+    "paper_size_multiplier": 0.5,   # half size — it's research, not conviction
+},
+```
+
+**Done when:** `research` appears in the Settings threshold profile dropdown. Switch to it, run `process_candidates`, see more ACT signals.
+
+---
+
+### D2. Verify end-to-end: article → signal → trade
+
+After all the above, run a full cycle manually:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/api/jobs/poll_news
+curl -s -X POST http://127.0.0.1:8000/api/jobs/process_candidates
+```
+
+Then check:
+```bash
+sqlite3 data.db "
+SELECT a.title, m.question, s.action, s.confidence, s.rejection_reason
+FROM news_signals s
+JOIN news_articles a ON a.id = s.article_id
+JOIN markets m ON m.id = s.market_id
+WHERE s.created_at >= datetime('now', '-1 hour')
+ORDER BY s.created_at DESC LIMIT 20;"
+```
+
+Look for:
+- Non-zero signal count → matcher is working
+- `action = 'ACT'` rows → thresholds are passing at least some signals
+- If all `ABSTAIN`/`REJECT_*` → loosen threshold profile or check LLM key
+
+**Done when:** at least one `ACT` signal in the last hour.
+
+---
+
+## Acceptance: "real data by morning"
+
+Eric wants to open the dashboard tomorrow and see:
+
+- [ ] Snapshot count growing (> 100 non-fixture snapshots in DB)
+- [ ] Articles from real sources (AP, BBC, Guardian etc.) in `/news`
+- [ ] Signals on `/signals` — mix of ACT / ABSTAIN, real market questions
+- [ ] At least one paper trade on `/trades` (LIVE source)
+- [ ] `/analysis/funnel` shows the pipeline running
+- [ ] `/analysis/backtests` has at least one run with cases
+
+---
+
+## When you finish a block
+
+Update **Chad — completed** at the bottom with date + one line per item. Push to `main`.
 
 ---
 
 ## Chad — completed (log)
 
-- **2026-04-27 —** P0 item 1: `.git` repaired; `origin` → `https://github.com/skynet-watcher/Polymarket-News-Reaction.git`; `main` pushed / tracked. Local-only paths ignored: `.env`, `*.db*`, `Keys/`.
-- **2026-04-28 —** Hands-off **realtime paper**: `REALTIME_PAPER_QUICKSTART` + `make run-realtime`, README runbook/soak/SSE/proxy, snapshot loop heartbeat, async lag backfill (P1 #7), `GET /api/export/summary`, System status shows last job duration + row links, dashboard JS parity.
-- **2026-04-28 —** Phase 1 **news reaction backtester** implemented locally for review: local `price_snapshots` only, DB rows + JSONL event log, `/analysis/backtests`, and job endpoint with `since_hours`, `max_articles`, `min_snapshot_coverage`. Full suite: `52 passed`. Not pushed.
+- **2026-04-27 —** P0 item 1: `.git` repaired; `origin` → `https://github.com/skynet-watcher/Polymarket-News-Reaction.git`; `main` pushed / tracked.
+- **2026-04-28 —** Hands-off realtime paper: `REALTIME_PAPER_QUICKSTART`, `make run-realtime`, README runbook/soak/SSE/proxy, snapshot loop heartbeat, async lag backfill, `GET /api/export/summary`, System status shows last job duration + row links, dashboard JS parity.
+- **2026-04-28 —** Phase 1 news reaction backtester: `BacktestRun`, `BacktestCase`, `BacktestEventLog`, `POST /api/jobs/backtest_news_reactions`, `/analysis/backtests`, JSONL audit logs. 52 tests pass.
 
 ---
 
-_Last filled by Lucy for Chad — no code in this commit path; implement at your pace._
+_Alex — 2026-04-28. Eric's call on priorities; this is the fastest path to real data I can see._
