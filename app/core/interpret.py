@@ -2,12 +2,140 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 import httpx
 
 from app.models import Market, NewsArticle
 from app.settings import settings
+
+logger = logging.getLogger(__name__)
+
+
+async def batch_relevance_screen(
+    article: NewsArticle,
+    markets: list[Market],
+) -> list[dict[str, Any]]:
+    """
+    Stage-2 LLM relevance screen.
+
+    Sends one LLM call per batch of ``settings.matcher_llm_batch_size`` markets
+    and returns a list of dicts::
+
+        {"market_id": str, "score": float, "reason": str}
+
+    Only called when an OpenAI key is configured AND the candidate list is
+    non-empty.  Falls back to returning all candidates with score=1.0 when the
+    LLM is unavailable, so the pipeline degrades gracefully.
+    """
+    if not markets:
+        return []
+
+    if not settings.openai_api_key:
+        # No LLM: pass all candidates through so keyword matches still work.
+        return [{"market_id": m.id, "score": 1.0, "reason": "no-llm fallback"} for m in markets]
+
+    batch_size = max(1, settings.matcher_llm_batch_size)
+    results: list[dict[str, Any]] = []
+
+    for i in range(0, len(markets), batch_size):
+        batch = markets[i : i + batch_size]
+        try:
+            batch_results = await _llm_relevance_batch(article, batch)
+            results.extend(batch_results)
+        except Exception:
+            logger.exception(
+                "batch_relevance_screen LLM call failed for article=%s batch_start=%d; passing batch through",
+                article.id,
+                i,
+            )
+            # On error, pass the batch through rather than dropping it.
+            results.extend(
+                [{"market_id": m.id, "score": 1.0, "reason": "llm-error fallback"} for m in batch]
+            )
+
+    return results
+
+
+async def _llm_relevance_batch(
+    article: NewsArticle,
+    markets: list[Market],
+) -> list[dict[str, Any]]:
+    """
+    Single LLM call: score a batch of markets for relevance to one article.
+
+    Prompt asks the model to score each market 0.0–1.0 and return a JSON array.
+    Uses ``gpt-4o-mini`` for speed and cost efficiency.
+    """
+    numbered = "\n".join(
+        f'{idx + 1}. [id:{m.id}] {m.question}'
+        for idx, m in enumerate(markets)
+    )
+
+    # Truncate article body to keep prompt compact (RSS summaries are short anyway).
+    body_preview = (article.body or "")[:600].strip()
+
+    prompt = f"""You are a prediction-market relevance filter.
+
+Score each market question below for how directly the article affects or could resolve it.
+
+Scoring guide:
+  0.0 = completely unrelated
+  0.3 = tangentially related (same general topic, different specific question)
+  0.6 = probably relevant — article could move this market's price
+  0.9 = highly relevant — article directly addresses the market's resolution criteria
+  1.0 = article resolves or near-resolves the market
+
+Article headline: {article.title}
+Article summary: {body_preview}
+
+Markets to score:
+{numbered}
+
+Return ONLY a JSON array — one object per market, in the same order:
+[{{"id": "<market id from [id:...]>", "score": 0.0, "reason": "one sentence"}}]""".strip()
+
+    body = {
+        "model": settings.openai_model_interpreter,
+        "input": prompt,
+        "response_format": {"type": "json_object"},
+    }
+
+    trust = settings.http_trust_env and not settings.http_disable_env_proxy
+    async with httpx.AsyncClient(base_url=settings.openai_base_url, timeout=30.0, trust_env=trust) as client:
+        r = await client.post(
+            "/responses",
+            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+            json=body,
+        )
+        r.raise_for_status()
+        data = r.json()
+        text = _extract_response_text(data)
+
+    # The model sometimes wraps the array in {"results": [...]} — unwrap if needed.
+    parsed = json.loads(text)
+    if isinstance(parsed, dict):
+        # find the first list value
+        for v in parsed.values():
+            if isinstance(v, list):
+                parsed = v
+                break
+        else:
+            parsed = []
+
+    out: list[dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        market_id = str(item.get("id", "")).strip()
+        try:
+            score = float(item.get("score", 0.0))
+        except (TypeError, ValueError):
+            score = 0.0
+        out.append({"market_id": market_id, "score": score, "reason": item.get("reason", "")})
+
+    return out
 
 
 def _fallback_interpret(market: Market, article: NewsArticle) -> dict[str, Any]:
@@ -108,18 +236,27 @@ async def interpret_and_verify_with_timeout(
 
 
 async def _openai_interpret(market: Market, article: NewsArticle) -> dict[str, Any]:
-    prompt = f"""
-You are interpreting whether a news article resolves or materially affects a prediction market.
+    # Build optional context lines so the LLM has the full resolution picture.
+    extra_lines: list[str] = []
+    if market.rules_text:
+        extra_lines.append(f"Resolution rules:\n{market.rules_text}")
+    if market.resolution_source_text:
+        extra_lines.append(f"Authoritative resolution source: {market.resolution_source_text}")
+    if market.end_date:
+        extra_lines.append(f"Market closes: {market.end_date.date().isoformat()}")
+    extra_context = ("\n\n" + "\n\n".join(extra_lines)) if extra_lines else ""
+
+    prompt = f"""You are interpreting whether a news article resolves or materially affects a prediction market.
 Return ONLY valid JSON.
 
 Market question:
 {market.question}
 
 Market resolution criteria:
-{market.description or ""}
+{market.description or "(not specified)"}
+{extra_context}
 
-Allowed outcomes:
-YES, NO, UNKNOWN
+Allowed outcomes: YES, NO, UNKNOWN
 
 Article title:
 {article.title}
@@ -136,8 +273,7 @@ Return schema:
   "confidence": 0.0,
   "should_act": true,
   "reason": "..."
-}}
-""".strip()
+}}""".strip()
 
     body = {
         "model": settings.openai_model_interpreter,

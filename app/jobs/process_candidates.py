@@ -10,7 +10,7 @@ from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.gating import decide_action
-from app.core.interpret import interpret_and_verify_with_timeout
+from app.core.interpret import batch_relevance_screen, interpret_and_verify_with_timeout
 from app.core.matcher import match_article_to_markets
 from app.core.paper import maybe_paper_trade
 from app.db import SessionLocal
@@ -145,6 +145,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         }
 
     focus_n = await _lag_focus_top_n(session)
+    market_limit = settings.matcher_market_limit
     if focus_n > 0:
         top_ids = (
             await session.execute(
@@ -171,7 +172,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
                     select(Market)
                     .where(and_(Market.active == True, Market.closed == False))  # noqa: E712
                     .order_by(desc(Market.liquidity))
-                    .limit(300)
+                    .limit(market_limit)
                 )
             ).scalars().all()
     else:
@@ -180,7 +181,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
                 select(Market)
                 .where(and_(Market.active == True, Market.closed == False))  # noqa: E712
                 .order_by(desc(Market.liquidity))
-                .limit(300)
+                .limit(market_limit)
             )
         ).scalars().all()
 
@@ -188,10 +189,43 @@ async def run(session: AsyncSession) -> dict[str, Any]:
     t_match = time.perf_counter()
 
     for article in articles:
-        candidates = match_article_to_markets(article, markets, min_relevance=tctx.min_relevance)
-        for cand in candidates[:5]:
+        # ── Stage 1: keyword pre-filter (permissive) ──────────────────────────
+        kw_candidates = match_article_to_markets(
+            article,
+            markets,
+            min_relevance=settings.matcher_keyword_min_relevance,
+        )
+        # Cap before LLM to bound token spend.
+        kw_candidates = kw_candidates[: settings.matcher_keyword_max_candidates]
+
+        if not kw_candidates:
+            continue
+
+        # ── Stage 2: batch LLM relevance screen ──────────────────────────────
+        candidate_markets = [c["market"] for c in kw_candidates]
+        # Build a quick lookup so we can join LLM scores back to keyword scores.
+        kw_by_market_id = {c["market"].id: c for c in kw_candidates}
+
+        llm_scores = await batch_relevance_screen(article, candidate_markets)
+
+        # Keep only markets that pass the LLM threshold.
+        confirmed: list[dict] = []
+        for result in llm_scores:
+            mid = result["market_id"]
+            score = result["score"]
+            if score < settings.matcher_llm_min_relevance:
+                continue
+            kw = kw_by_market_id.get(mid)
+            if kw is None:
+                continue
+            confirmed.append({**kw, "llm_relevance": score})
+
+        # Sort confirmed by LLM score (highest first) and take top 5.
+        confirmed.sort(key=lambda x: x["llm_relevance"], reverse=True)
+
+        for cand in confirmed[:5]:
             market = cand["market"]
-            relevance = float(cand["relevance"])
+            relevance = float(cand["llm_relevance"])
 
             existing = (
                 await session.execute(

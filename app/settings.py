@@ -104,6 +104,24 @@ class Settings(BaseSettings):
     lag_weight_closure: float = 0.2
     lag_min_sample_size_for_zscore: int = 10
 
+    # Market universe filtering (Sprint A — future backfill jobs only, not live pipeline)
+    market_min_liquidity_for_sync: float = 500.0
+    market_min_days_to_resolution_hours: float = 1.0
+    market_max_days_to_resolution: int = 90
+    enable_resolution_worker: bool = False
+
+    # ── Matcher tuning ──────────────────────────────────────────────────────────
+    # Stage 1: keyword pre-filter (permissive — just removes clearly unrelated markets).
+    matcher_keyword_min_relevance: float = 0.15
+    # Max candidates forwarded from keyword stage to LLM screen (per article).
+    matcher_keyword_max_candidates: int = 30
+    # Max markets loaded from DB per process_candidates run.
+    matcher_market_limit: int = 100
+    # Markets per batch_relevance_screen LLM call.
+    matcher_llm_batch_size: int = 8
+    # Minimum LLM relevance score to promote a candidate to interpret+verify.
+    matcher_llm_min_relevance: float = 0.50
+
     @model_validator(mode="after")
     def apply_realtime_paper_quickstart(self):
         if not self.realtime_paper_quickstart:
