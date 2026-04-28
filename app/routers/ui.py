@@ -34,7 +34,7 @@ from app.paper_economics import aggregate_portfolio, live_net_mark_usd
 from app.settings import settings as app_settings
 from app.threshold_context import RUNTIME_KEY_THRESHOLD_PROFILE, resolve_trading_thresholds
 from app.threshold_profiles_seed import ensure_default_threshold_profiles
-from app.util import format_lag_seconds, new_id, now_utc
+from app.util import format_lag_seconds, new_id, now_utc, to_utc_aware
 
 
 router = APIRouter()
@@ -481,13 +481,14 @@ async def laggy_markets_page(request: Request, session: AsyncSession = Depends(g
 async def health_check(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
     now = now_utc()
 
-    # Gate 1: Real price data flowing (exclude the smoke_mkt demo fixture)
+    # Gate 1: Real price data flowing (exclude fixture / demo markets via is_fixture flag)
+    not_fixture = Market.is_fixture.is_not(True)
     real_snap_count = (
         await session.execute(
             select(func.count())
             .select_from(PriceSnapshot)
             .join(Market, Market.id == PriceSnapshot.market_id)
-            .where(Market.id != "smoke_mkt")
+            .where(not_fixture)
         )
     ).scalar_one() or 0
 
@@ -496,7 +497,7 @@ async def health_check(request: Request, session: AsyncSession = Depends(get_ses
             select(func.count(func.distinct(PriceSnapshot.market_id)))
             .select_from(PriceSnapshot)
             .join(Market, Market.id == PriceSnapshot.market_id)
-            .where(Market.id != "smoke_mkt")
+            .where(not_fixture)
         )
     ).scalar_one() or 0
 
