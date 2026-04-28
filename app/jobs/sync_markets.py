@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -27,6 +28,29 @@ def _is_binary(outcomes: list[str]) -> bool:
         return False
     norm = {o.strip().lower() for o in outcomes}
     return norm == {"yes", "no"} or len(norm) == 2
+
+
+def _jsonish_list(value: Any) -> Optional[list[str]]:
+    """Gamma often returns fields like clobTokenIds/outcomes as JSON strings."""
+    if value is None:
+        return None
+    raw = value
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        try:
+            raw = json.loads(s)
+        except json.JSONDecodeError:
+            raw = [item.strip() for item in s.split(",") if item.strip()]
+    if not isinstance(raw, list):
+        return None
+    out = [str(item).strip() for item in raw if str(item).strip()]
+    return out or None
+
+
+def _gamma_token_ids(rm: dict[str, Any]) -> Optional[list[str]]:
+    return _jsonish_list(rm.get("clobTokenIds") or rm.get("tokenIds") or rm.get("token_ids"))
 
 
 def _normalize_events_payload(batch: Any) -> list[dict[str, Any]]:
@@ -249,9 +273,11 @@ async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str
             continue
         if mid in by_id:
             existing = by_id[mid]
-            # Patch in tokenIds if the events entry is missing them.
-            if not existing.get("tokenIds") and rm.get("tokenIds"):
-                existing["tokenIds"] = rm["tokenIds"]
+            # Patch in CLOB token IDs if the events entry is missing them.
+            if _gamma_token_ids(existing) is None:
+                token_ids = _gamma_token_ids(rm)
+                if token_ids is not None:
+                    existing["clobTokenIds"] = token_ids
             # Patch in any other fields the events path left empty.
             for key in ("category", "slug", "description"):
                 if not existing.get(key) and rm.get(key):
@@ -276,7 +302,11 @@ async def _fetch_best_bid_ask_yes(
     for path in ("/book", "/orderbook"):
         try:
             url = f"{settings.polymarket_clob_base_url}{path}"
-            r = await get_with_retry(client, url, params={"token_id": token_id_yes})
+            r = await client.get(
+                url,
+                params={"token_id": token_id_yes},
+                timeout=settings.clob_orderbook_timeout_seconds,
+            )
             if r.status_code >= 400:
                 continue
             data = r.json()
@@ -461,6 +491,8 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
 
         upserted = 0
         snapshotted = 0
+        clob_attempted = 0
+        clob_skipped = 0
 
         for rm in raw_markets:
             market_id = str(rm.get("id") or rm.get("market_id") or "").strip()
@@ -468,12 +500,9 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
             if not market_id or not question:
                 continue
 
-            outcomes = rm.get("outcomes") or rm.get("outcome") or []
-            if isinstance(outcomes, str):
-                outcomes = [o.strip() for o in outcomes.split(",") if o.strip()]
-            if not isinstance(outcomes, list):
+            outcomes = _jsonish_list(rm.get("outcomes") or rm.get("outcome"))
+            if not outcomes:
                 continue
-            outcomes = [str(o) for o in outcomes]
 
             if not _is_binary(outcomes):
                 continue
@@ -489,15 +518,16 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
             rules_text = _gamma_rules_text(rm)
             enable_ob = _enable_orderbook_flag(rm)
 
-            token_ids = rm.get("tokenIds") or rm.get("token_ids") or None
-            if isinstance(token_ids, str):
-                token_ids = [t.strip() for t in token_ids.split(",") if t.strip()]
+            token_ids = _gamma_token_ids(rm)
             token_ids_yes = token_ids[0] if isinstance(token_ids, list) and token_ids else None
 
             best_bid: Optional[float] = None
             best_ask: Optional[float] = None
-            if enable_ob and token_ids_yes:
+            if enable_ob and token_ids_yes and clob_attempted < settings.sync_clob_snapshot_limit:
+                clob_attempted += 1
                 best_bid, best_ask = await _fetch_best_bid_ask_yes(client, token_ids_yes)
+            elif enable_ob and token_ids_yes:
+                clob_skipped += 1
             mid = None
             if best_bid is not None and best_ask is not None:
                 mid = (best_bid + best_ask) / 2.0
@@ -580,6 +610,8 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
         return {
             "upserted": upserted,
             "snapshotted": snapshotted,
+            "clob_attempted": clob_attempted,
+            "clob_skipped": clob_skipped,
             "fetched": len(raw_markets),
             "markets_source": markets_source,
         }

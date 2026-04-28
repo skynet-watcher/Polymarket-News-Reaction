@@ -55,7 +55,14 @@
               <tr class="border-t border-slate-800 align-top">
                 <td class="py-2 pr-3 whitespace-nowrap">{{ t.created_at }}</td>
                 <td class="py-2 pr-3 whitespace-nowrap text-slate-300">{{ t.market_id }}</td>
-                <td class="py-2 pr-3">{{ t.side }}</td>
+                <td class="py-2 pr-3">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span>{{ t.side }}</span>
+                    {% if t.trade_source == "BACKTEST" %}
+                      <span class="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400">BACKTEST</span>
+                    {% endif %}
+                  </div>
+                </td>
                 <td class="py-2 pr-3">{{ "%.2f"|format(t.simulated_size) }}</td>
                 <td class="py-2 pr-3">{{ "%.4f"|format(t.fill_price) }}</td>
                 <td class="py-2 pr-3">
@@ -96,4 +103,3 @@
     </div>
   </div>
 {% endblock %}
-

@@ -54,6 +54,9 @@ def test_init_db_backfills_recent_sqlite_columns() -> None:
                 backtest_case_cols = {
                     row[1] for row in (await conn.execute(text("PRAGMA table_info(backtest_cases)"))).fetchall()
                 }
+                trade_cols = {
+                    row[1] for row in (await conn.execute(text("PRAGMA table_info(paper_trades)"))).fetchall()
+                }
 
             assert {"market_type", "is_control_market", "manipulation_risk_flag"}.issubset(market_cols)
             assert "signal_source_type" in signal_cols
@@ -65,9 +68,11 @@ def test_init_db_backfills_recent_sqlite_columns() -> None:
                 "article_id",
                 "market_id",
                 "hours_to_resolution",
+                "signal_action",
                 "price_windows_json",
                 "coverage_status",
             }.issubset(backtest_case_cols)
+            assert {"trade_source", "backtest_case_id"}.issubset(trade_cols)
         finally:
             await engine.dispose()
 

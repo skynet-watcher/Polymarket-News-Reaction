@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     http_disable_env_proxy: bool = False  # if True, set trust_env=False on clients
     http_max_retries: int = 3
     http_retry_backoff_seconds: float = 0.5
+    clob_orderbook_timeout_seconds: float = 5.0
+    sync_clob_snapshot_limit: int = 50
 
     # On startup, upsert curated RSS feeds in `app/live_feeds.py` and disable the demo fixture when present.
     auto_seed_news_feeds: bool = True
@@ -136,4 +138,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

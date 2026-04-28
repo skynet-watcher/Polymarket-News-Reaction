@@ -101,6 +101,30 @@ This is a **paper-trading only** research MVP that:
 
 ---
 
+## Chad — next sprint jobs
+
+> Current owner: **Chad**. Work these in order until paper trading/data collection is visibly healthy.
+
+### Questions to answer whenever paper trades are at zero
+
+1. **Is the app alive?** `/healthz` should be green and System status should show recent `sync_markets`, `poll_news`, and `process_candidates` success.
+2. **Do real markets have CLOB token IDs?** `markets.token_ids_json` must contain real token arrays, not JSON `null`; without this, no real price snapshots can be written.
+3. **Are price snapshots moving?** `price_snapshots` should grow after market sync. If it stays flat, debug Gamma token fields and CLOB `/book` responses before touching trading thresholds.
+4. **Is news fresh enough for the active threshold profile?** The default conservative profile only processes recent articles; old articles will not generate new trades.
+5. **Are signals reaching ACT?** If most rows are `ABSTAIN` with `NOT_DIRECT_EVIDENCE`, the blocker is evidence/LLM confidence rather than order execution.
+6. **Is the threshold profile too tight for exploration?** Conservative is research-safe but slow. Use balanced/aggressive only for paper experiments.
+7. **Did ACT produce an orderbook-backed fill?** An ACT signal can still create no trade when the CLOB book is missing, spread is too wide, or price/liquidity gates fail.
+8. **Are trades LIVE or BACKTEST?** Backtest-generated trades are intentionally marked `BACKTEST`; live pipeline trades should remain `LIVE`.
+
+### Current priority list
+
+1. **Price-feed health:** keep validating Gamma `clobTokenIds` parsing and CLOB snapshot counts after each sync.
+2. **Trade visibility:** keep BACKTEST badges distinct from LIVE paper trades on `/trades`.
+3. **Backtest research UX:** keep `/analysis/backtests` useful for missed-opportunity slicing by run and `signal_action`.
+4. **Candidate diagnostics:** add a small UI/export summary for recent candidate counts, ACT count, rejection reasons, and missing-orderbook trade skips.
+5. **Tuning pass:** once real snapshots are flowing, run a 1–3 hour paper-only soak on balanced/aggressive and record which gate blocks trades most often.
+6. **Lucy handoff:** update this section and `CHAD_SPRINT.md` after every tested chunk; keep `.env`, DB files, logs, and keys out of git.
+
 ## Open items for Chad
 
 > Alex: these are ready to pick up — no blockers, no design decisions needed.
@@ -108,17 +132,27 @@ This is a **paper-trading only** research MVP that:
 ### 1. UI — badge BACKTEST trades on the trades page
 The `PaperTrade.trade_source` field is now `LIVE` or `BACKTEST`. The trades list in the UI should show a muted `[BACKTEST]` badge next to any row where `trade_source == "BACKTEST"` so they're visually distinct from live paper trades. The `backtest_case_id` FK is also there if you want to link directly to the relevant backtest case.
 
+**Status:** done locally by Chad; `/trades` now shows a muted `BACKTEST` badge in the side column.
+
 ### 2. UI — `/analysis/backtests` run selector
 The backtests page always shows the **latest** run. The `runs` list is already fetched and passed to the template but not used for navigation. Add a simple dropdown or list on the left so users can click any past run and see its cases. No backend changes needed — just template work.
+
+**Status:** done locally by Chad; recent runs are now clickable and the selected run is highlighted.
 
 ### 3. Backtest: add `signal_action` filter to the cases table
 The `BacktestCase.signal_action` field (`ACT` / `ABSTAIN` / `CANDIDATE` / `REJECT_*`) is now populated. On the backtests page, add a filter row or column so users can isolate "missed opportunities" (non-ACT cases) vs "trades we made" (ACT cases). This is the core research view.
 
+**Status:** done locally by Chad; the cases table now has an action column plus filter chips per selected run.
+
 ### 4. Check Gamma `end_date_min` / `end_date_max` param names
 The near-resolution market sweep (`_fetch_near_resolution_markets` in `sync_markets.py`) passes `end_date_min` and `end_date_max` to the Gamma `/markets` endpoint. These are guesses at the param names — confirm they're correct by checking a live response or the Gamma API docs. If they're wrong, the sweep silently returns nothing (it catches errors). Fix the param names if needed.
 
+**Status:** confirmed from Polymarket Gamma docs: `end_date_min` and `end_date_max` are valid `/markets` query parameters.
+
 ### 5. CHAD_SPRINT.md — mark completed items
 Several items in `CHAD_SPRINT.md` are done but not marked. Do a pass and check off what's shipped.
+
+**Status:** in progress; Chad is updating it alongside this sprint chunk.
 
 ---
 
@@ -202,6 +236,8 @@ That **caps** RSS poll (≤120s), candidate processing (≤60s), full Gamma snap
 | `REALTIME_PAPER_QUICKSTART` | `1` = faster cadence (see above). |
 | `BACKGROUND_*_INTERVAL_SECONDS` | `0` disables that background loop; see `.env.example`. |
 | `LLM_MAX_CONCURRENCY` | Parallel candidate workers; set `1` if you see `database is locked`. |
+| `SYNC_CLOB_SNAPSHOT_LIMIT` | Max CLOB orderbook probes per full market sync (default **50**) so Sync markets stays bounded. |
+| `CLOB_ORDERBOOK_TIMEOUT_SECONDS` | Per-orderbook timeout during snapshot sync (default **5s**). |
 | `TRADING_ENABLED` | Must stay `false` for this MVP (paper only). |
 | `DASHBOARD_SSE_ENABLED` | Live dashboard counts via `/api/stream/dashboard`. |
 

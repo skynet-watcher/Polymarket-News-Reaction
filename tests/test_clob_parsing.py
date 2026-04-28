@@ -1,4 +1,4 @@
-from app.jobs.sync_markets import parse_clob_best_prices
+from app.jobs.sync_markets import _gamma_token_ids, _jsonish_list, parse_clob_best_prices
 
 
 def test_parse_clob_best_prices_list_levels():
@@ -23,3 +23,13 @@ def test_parse_clob_best_prices_missing_or_invalid():
     assert bid is None
     assert ask is None
 
+
+def test_jsonish_list_parses_gamma_encoded_arrays():
+    assert _jsonish_list('["Yes", "No"]') == ["Yes", "No"]
+    assert _jsonish_list("123,456") == ["123", "456"]
+    assert _jsonish_list(["A", "B"]) == ["A", "B"]
+
+
+def test_gamma_token_ids_prefers_clob_token_ids_field():
+    row = {"clobTokenIds": '["yes_token", "no_token"]', "tokenIds": None}
+    assert _gamma_token_ids(row) == ["yes_token", "no_token"]

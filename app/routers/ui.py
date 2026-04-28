@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, desc, func, literal, select
@@ -202,18 +203,32 @@ async def analysis(request: Request, session: AsyncSession = Depends(get_session
 
 
 @router.get("/analysis/backtests", response_class=HTMLResponse)
-async def backtests(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+async def backtests(
+    request: Request,
+    run_id: Optional[str] = Query(default=None),
+    signal_action: Optional[str] = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
     runs = (
         await session.execute(select(BacktestRun).order_by(desc(BacktestRun.started_at)).limit(20))
     ).scalars().all()
-    latest = runs[0] if runs else None
+    selected_run = None
+    if run_id:
+        selected_run = await session.get(BacktestRun, run_id)
+    latest = selected_run or (runs[0] if runs else None)
     cases = []
     coverage_counts = []
+    action_counts = []
     if latest is not None:
+        case_query = select(BacktestCase).where(BacktestCase.run_id == latest.id)
+        if signal_action:
+            if signal_action == "NONE":
+                case_query = case_query.where(BacktestCase.signal_action.is_(None))
+            else:
+                case_query = case_query.where(BacktestCase.signal_action == signal_action)
         cases = (
             await session.execute(
-                select(BacktestCase)
-                .where(BacktestCase.run_id == latest.id)
+                case_query
                 .order_by(desc(BacktestCase.created_at))
                 .limit(200)
             )
@@ -226,6 +241,15 @@ async def backtests(request: Request, session: AsyncSession = Depends(get_sessio
             )
         ).all()
         coverage_counts = [{"status": row[0], "count": row[1]} for row in coverage_rows]
+        action_rows = (
+            await session.execute(
+                select(BacktestCase.signal_action, func.count().label("count"))
+                .where(BacktestCase.run_id == latest.id)
+                .group_by(BacktestCase.signal_action)
+                .order_by(desc(func.count()))
+            )
+        ).all()
+        action_counts = [{"action": row[0] or "NONE", "count": row[1]} for row in action_rows]
 
     return templates.TemplateResponse(
         "backtests.html",
@@ -235,6 +259,9 @@ async def backtests(request: Request, session: AsyncSession = Depends(get_sessio
             "latest": latest,
             "cases": cases,
             "coverage_counts": coverage_counts,
+            "action_counts": action_counts,
+            "selected_run_id": latest.id if latest is not None else None,
+            "selected_signal_action": signal_action or "",
         },
     )
 

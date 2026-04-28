@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.jobs import sync_markets
-from app.models import Base, Market, RuntimeSetting
+from app.models import Base, Market, PriceSnapshot, RuntimeSetting
 from app.settings import settings
 
 # Patching `app.jobs.sync_markets.httpx.AsyncClient` mutates `httpx.AsyncClient` on the
@@ -210,6 +210,70 @@ def test_sync_run_falls_back_to_fixture_when_gamma_returns_http_error():
             assert src is not None and src.value == "fixture"
             demo = (await session.execute(select(Market).where(Market.id == "demo_mkt_1"))).scalar_one_or_none()
             assert demo is not None
+        finally:
+            await session.close()
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def test_sync_run_persists_clob_token_ids_and_real_snapshot():
+    """Gamma /markets exposes CLOB tokens as clobTokenIds; sync must use them for snapshots."""
+
+    market_row = {
+        "id": "m_clob_tokens",
+        "question": "Will token parsing work?",
+        "outcomes": '["Yes", "No"]',
+        "active": True,
+        "closed": False,
+        "clobTokenIds": '["yes_token", "no_token"]',
+        "liquidity": "5000",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if settings.polymarket_clob_base_url in url:
+            assert request.url.params.get("token_id") == "yes_token"
+            return httpx.Response(
+                200,
+                json={
+                    "bids": [{"price": "0.41", "size": "100"}],
+                    "asks": [{"price": "0.43", "size": "100"}],
+                },
+            )
+        if settings.polymarket_gamma_base_url not in url:
+            return httpx.Response(404, json={})
+        if "/events" in url:
+            return httpx.Response(200, json=[])
+        if "/markets" in url:
+            qp = request.url.params
+            if qp.get("active") == "true" and qp.get("closed") == "false":
+                return httpx.Response(200, json=[market_row])
+            return httpx.Response(200, json=[])
+        return httpx.Response(404, json={})
+
+    async def _run() -> None:
+        transport = httpx.MockTransport(handler)
+
+        def client_with_transport(**kwargs):
+            kw = dict(kwargs)
+            kw["transport"] = transport
+            return _REAL_ASYNC_CLIENT(**kw)
+
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+        session = factory()
+        try:
+            with patch("app.jobs.sync_markets.polymarket_async_client", client_with_transport):
+                out = await sync_markets.run(session)
+            assert out["snapshotted"] == 1
+            row = (await session.execute(select(Market).where(Market.id == "m_clob_tokens"))).scalar_one()
+            assert row.token_ids_json == ["yes_token", "no_token"]
+            snap = (await session.execute(select(PriceSnapshot))).scalar_one()
+            assert snap.market_id == "m_clob_tokens"
+            assert snap.mid_yes == 0.42
         finally:
             await session.close()
             await engine.dispose()

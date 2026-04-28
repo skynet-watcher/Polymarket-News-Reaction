@@ -59,7 +59,7 @@
   <div class="rounded bg-slate-900 p-4 mb-6">
     <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
       <div>
-        <div class="text-sm font-semibold">Latest run</div>
+        <div class="text-sm font-semibold">Selected run</div>
         <div class="text-xs text-slate-500">{{ latest.id }} · {{ latest.status }} · started {{ latest.started_at }}</div>
       </div>
       <div class="text-xs text-slate-400">
@@ -68,11 +68,21 @@
         {% endfor %}
       </div>
     </div>
+    <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
+      <span class="text-slate-500">Signal action</span>
+      <a class="px-2 py-1 rounded border {{ 'border-amber-500 text-amber-300' if not selected_signal_action else 'border-slate-700 text-slate-300 hover:border-slate-500' }}" href="/analysis/backtests?run_id={{ latest.id }}">All</a>
+      {% for row in action_counts %}
+        <a class="px-2 py-1 rounded border {{ 'border-amber-500 text-amber-300' if selected_signal_action == row.action else 'border-slate-700 text-slate-300 hover:border-slate-500' }}" href="/analysis/backtests?run_id={{ latest.id }}&signal_action={{ row.action }}">
+          {{ row.action }} · {{ row.count }}
+        </a>
+      {% endfor %}
+    </div>
     <div class="overflow-auto">
       <table class="w-full text-sm">
         <thead class="text-slate-400 text-left">
           <tr>
             <th class="py-2 pr-3">coverage</th>
+            <th class="py-2 pr-3">action</th>
             <th class="py-2 pr-3">published</th>
             <th class="py-2 pr-3">fetch delay</th>
             <th class="py-2 pr-3">signal delay</th>
@@ -89,6 +99,7 @@
           {% for c in cases %}
             <tr class="border-t border-slate-800 align-top">
               <td class="py-2 pr-3">{{ c.coverage_status }}</td>
+              <td class="py-2 pr-3">{{ c.signal_action or "—" }}</td>
               <td class="py-2 pr-3 whitespace-nowrap">{{ c.published_at }}</td>
               <td class="py-2 pr-3">{{ c.polling_delay_seconds | format_lag }}</td>
               <td class="py-2 pr-3">{% if c.signal_delay_seconds is not none %}{{ c.signal_delay_seconds | format_lag }}{% else %}—{% endif %}</td>
@@ -109,8 +120,8 @@
           {% endfor %}
           {% if not cases %}
             <tr>
-              <td colspan="11" class="py-8 text-center text-slate-500 text-sm">
-                Latest run had no cases. Process candidates first, then rerun the backtest.
+              <td colspan="12" class="py-8 text-center text-slate-500 text-sm">
+                This run has no cases for the selected filter. Process candidates first, then rerun the backtest.
               </td>
             </tr>
           {% endif %}
@@ -137,8 +148,10 @@
     </thead>
     <tbody>
       {% for r in runs %}
-        <tr class="border-t border-slate-800">
-          <td class="py-2 pr-3 whitespace-nowrap">{{ r.started_at }}</td>
+        <tr class="border-t border-slate-800 {{ 'bg-slate-800/40' if r.id == selected_run_id else '' }}">
+          <td class="py-2 pr-3 whitespace-nowrap">
+            <a class="text-amber-300 hover:text-amber-200" href="/analysis/backtests?run_id={{ r.id }}">{{ r.started_at }}</a>
+          </td>
           <td class="py-2 pr-3">{{ r.status }}</td>
           <td class="py-2 pr-3">{{ (r.summary_json or {}).get("cases", "—") }}</td>
           <td class="py-2 pr-3 text-slate-400">{{ r.params_json }}</td>

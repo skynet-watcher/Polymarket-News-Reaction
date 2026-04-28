@@ -46,6 +46,24 @@ async def init_db(engine: AsyncEngine) -> None:
         await _ensure_column(conn, table="paper_trades", column="net_pnl_usd", ddl="ALTER TABLE paper_trades ADD COLUMN net_pnl_usd FLOAT")
         await _ensure_column(
             conn,
+            table="paper_trades",
+            column="trade_source",
+            ddl="ALTER TABLE paper_trades ADD COLUMN trade_source VARCHAR DEFAULT 'LIVE'",
+        )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="backtest_case_id",
+            ddl="ALTER TABLE paper_trades ADD COLUMN backtest_case_id VARCHAR",
+        )
+        await _ensure_column(
+            conn,
+            table="backtest_cases",
+            column="signal_action",
+            ddl="ALTER TABLE backtest_cases ADD COLUMN signal_action VARCHAR",
+        )
+        await _ensure_column(
+            conn,
             table="backtest_cases",
             column="hours_to_resolution",
             ddl="ALTER TABLE backtest_cases ADD COLUMN hours_to_resolution FLOAT",

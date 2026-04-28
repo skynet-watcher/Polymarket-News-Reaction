@@ -8,7 +8,7 @@
 
 ## Context: what just changed (read this first)
 
-1. **tokenIds bug fixed.** Every real Polymarket market had `token_ids_json = null` — CLOB price fetches silently skipped, zero snapshots ever written for real markets. Fixed in commit `8e53418`. First sync after pulling will populate token IDs and snapshots will start flowing.
+1. **tokenIds bug found again at the field-name layer.** Every real Polymarket market had `token_ids_json = null` — CLOB price fetches silently skipped, zero snapshots ever written for real markets. Commit `8e53418` added the `/markets` merge path, but Gamma exposes usable CLOB tokens as `clobTokenIds` (often a JSON string), not only `tokenIds`. Chad fixed that locally; first sync after pulling should populate token IDs and snapshots should start flowing.
 
 2. **Two-stage matcher deployed.** Keyword pre-filter at 0.15 threshold + batched LLM relevance screen. Signals were near-zero before; should be much higher now.
 
@@ -46,13 +46,15 @@ Then from the dashboard or curl:
 curl -s -X POST http://127.0.0.1:8000/api/jobs/sync_markets
 
 # Wait ~30s, then check snapshot count (should be > 6 and growing)
-sqlite3 data.db "SELECT COUNT(*), MAX(timestamp) FROM price_snapshots WHERE id NOT LIKE '%smoke%';"
+sqlite3 data.db "SELECT COUNT(*), MAX(timestamp) FROM price_snapshots WHERE market_id != 'smoke_mkt';"
 
 # Check that token IDs are now populated
-sqlite3 data.db "SELECT COUNT(*) FROM markets WHERE token_ids_json IS NOT NULL AND active=1 AND closed=0;"
+sqlite3 data.db "SELECT COUNT(*) FROM markets WHERE json_type(token_ids_json)='array' AND json_array_length(token_ids_json)>0 AND active=1 AND closed=0;"
 ```
 
 **Done when:** snapshot count for non-fixture markets is growing after each sync.
+
+**Status:** fixed locally by Chad. `sync_markets` now parses Gamma `clobTokenIds` and JSON-encoded arrays for both outcomes and token IDs; tests cover the snapshot path. Full sync also has a bounded CLOB probe cap (`SYNC_CLOB_SNAPSHOT_LIMIT`, default 50) so a manual sync cannot spend forever on hundreds of orderbooks.
 
 ---
 
@@ -128,6 +130,8 @@ If count is 0 after a sync, the params are wrong. Check the Gamma `/markets` API
 
 **Done when:** the above query returns > 0 markets after a sync.
 
+**Status:** docs-confirmed by Chad. Polymarket Gamma `/markets` documents `end_date_min` and `end_date_max` as valid query parameters.
+
 ---
 
 ## Block B — Signal funnel visibility
@@ -192,6 +196,8 @@ Link `backtest_case_id` to the relevant case on `/analysis/backtests` if it exis
 
 **Done when:** backtest trades show a distinct badge; live trades show nothing different.
 
+**Status:** done locally by Chad.
+
 ---
 
 ### C2. Backtest run selector
@@ -199,6 +205,8 @@ Link `backtest_case_id` to the relevant case on `/analysis/backtests` if it exis
 The `/analysis/backtests` page already fetches `runs` but only shows the latest. Add a simple `<select>` or list on the page so you can view any past run's cases. The backend already passes `runs` to the template — it's template-only work.
 
 **Done when:** clicking a past run loads its cases.
+
+**Status:** done locally by Chad.
 
 ---
 
@@ -212,6 +220,8 @@ Add a filter row or tab on `/analysis/backtests` for:
 Use `BacktestCase.signal_action` which is now populated. Query-side, just add a `WHERE signal_action = ?` clause when the filter is selected.
 
 **Done when:** user can filter backtest cases to show only "missed" signals.
+
+**Status:** done locally by Chad; current UI filters exact `signal_action` values, including `NONE`.
 
 ---
 
@@ -295,6 +305,7 @@ Update **Chad — completed** at the bottom with date + one line per item. Push 
 - **2026-04-27 —** P0 item 1: `.git` repaired; `origin` → `https://github.com/skynet-watcher/Polymarket-News-Reaction.git`; `main` pushed / tracked.
 - **2026-04-28 —** Hands-off realtime paper: `REALTIME_PAPER_QUICKSTART`, `make run-realtime`, README runbook/soak/SSE/proxy, snapshot loop heartbeat, async lag backfill, `GET /api/export/summary`, System status shows last job duration + row links, dashboard JS parity.
 - **2026-04-28 —** Phase 1 news reaction backtester: `BacktestRun`, `BacktestCase`, `BacktestEventLog`, `POST /api/jobs/backtest_news_reactions`, `/analysis/backtests`, JSONL audit logs. 52 tests pass.
+- **2026-04-28 —** No-paper-trades diagnosis: real markets still had JSON `null` token IDs; `sync_markets` now reads Gamma `clobTokenIds`, existing SQLite DBs backfill backtest trade columns, `/trades` badges BACKTEST rows, and `/analysis/backtests` supports run/action filtering.
 
 ---
 
