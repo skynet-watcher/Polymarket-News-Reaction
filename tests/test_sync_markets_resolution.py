@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.jobs import sync_markets
-from app.models import Base, Market
+from app.models import Base, Market, RuntimeSetting
 from app.settings import settings
 
 # Patching `app.jobs.sync_markets.httpx.AsyncClient` mutates `httpx.AsyncClient` on the
@@ -121,6 +121,9 @@ def test_sync_run_persists_winning_outcome_from_closed_fetch():
             with patch("app.jobs.sync_markets.polymarket_async_client", client_with_transport):
                 out = await sync_markets.run(session)
             assert out["upserted"] >= 1
+            assert out.get("markets_source") == "live"
+            src = await session.get(RuntimeSetting, "sync_markets_data_source")
+            assert src is not None and src.value == "live"
             row = (await session.execute(select(Market).where(Market.id == "m_resolved_only"))).scalar_one()
             assert row.closed is True
             assert row.winning_outcome == "NO"
@@ -202,6 +205,9 @@ def test_sync_run_falls_back_to_fixture_when_gamma_returns_http_error():
                 out = await sync_markets.run(session)
             assert out["fetched"] >= 1
             assert out["upserted"] >= 1
+            assert out.get("markets_source") == "fixture"
+            src = await session.get(RuntimeSetting, "sync_markets_data_source")
+            assert src is not None and src.value == "fixture"
             demo = (await session.execute(select(Market).where(Market.id == "demo_mkt_1"))).scalar_one_or_none()
             assert demo is not None
         finally:

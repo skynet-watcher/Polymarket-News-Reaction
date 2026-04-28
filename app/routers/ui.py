@@ -75,7 +75,28 @@ async def signals(request: Request, session: AsyncSession = Depends(get_session)
             .limit(200)
         )
     ).scalars().all()
-    return templates.TemplateResponse("signals.html", {"request": request, "signals": rows})
+    src_row = await session.get(RuntimeSetting, "sync_markets_data_source")
+    markets_data_source = (src_row.value if src_row is not None else "") or ""
+    # Heuristic: DBs synced before we persisted source — if every market id looks like the offline fixture, warn.
+    if markets_data_source != "fixture":
+        total_m = int((await session.execute(select(func.count()).select_from(Market))).scalar_one() or 0)
+        if total_m > 0:
+            demo_m = int(
+                (
+                    await session.execute(select(func.count()).select_from(Market).where(Market.id.like("demo%")))
+                ).scalar_one()
+                or 0
+            )
+            if demo_m == total_m:
+                markets_data_source = "fixture"
+    return templates.TemplateResponse(
+        "signals.html",
+        {
+            "request": request,
+            "signals": rows,
+            "markets_data_source": markets_data_source,
+        },
+    )
 
 
 @router.get("/trades", response_class=HTMLResponse)

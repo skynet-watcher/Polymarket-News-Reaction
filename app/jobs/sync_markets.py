@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -9,12 +10,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.http_client import get_with_retry, polymarket_async_client
-from app.models import Market, PaperTrade, PriceSnapshot
+from app.models import Market, PaperTrade, PriceSnapshot, RuntimeSetting
 from app.settings import settings
 from app.util import new_id, now_utc
 
+logger = logging.getLogger(__name__)
+
 # One sync at a time: background snapshot loop + POST /api/jobs/sync_markets share SQLite.
 _sync_markets_lock = asyncio.Lock()
+
+RUNTIME_KEY_SYNC_MARKETS_SOURCE = "sync_markets_data_source"
 
 
 def _is_binary(outcomes: list[str]) -> bool:
@@ -344,12 +349,27 @@ async def _refresh_open_position_markets_unlocked(session: AsyncSession) -> dict
     return {"markets": len(markets), "snapshotted": snapshotted}
 
 
+async def _runtime_set_str(session: AsyncSession, key: str, value: str) -> None:
+    row = await session.get(RuntimeSetting, key)
+    if row is None:
+        session.add(RuntimeSetting(key=key, value=value))
+    else:
+        row.value = value
+
+
 async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
+    markets_source = "live"
     async with polymarket_async_client() as client:
         try:
             raw_markets = await _fetch_all_markets_unified(client)
-        except httpx.HTTPError:
+        except httpx.HTTPError as exc:
             # Gamma/CLOB may return 403/5xx or reset connection; fixture keeps the app usable offline.
+            markets_source = "fixture"
+            logger.warning(
+                "Polymarket API unreachable (%s); using offline fixture markets only. "
+                "Candidate matching will look synthetic until a sync succeeds against the real API.",
+                type(exc).__name__,
+            )
             raw_markets = _load_fixture_markets()
 
         upserted = 0
@@ -468,8 +488,14 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
                 session.add(snap)
                 snapshotted += 1
 
+        await _runtime_set_str(session, RUNTIME_KEY_SYNC_MARKETS_SOURCE, markets_source)
         await session.commit()
-        return {"upserted": upserted, "snapshotted": snapshotted, "fetched": len(raw_markets)}
+        return {
+            "upserted": upserted,
+            "snapshotted": snapshotted,
+            "fetched": len(raw_markets),
+            "markets_source": markets_source,
+        }
 
 
 def _parse_dt(value: Any) -> Optional[dt.datetime]:

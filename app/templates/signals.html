@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
+  {% if markets_data_source == "fixture" %}
+    <div class="rounded border border-amber-700/80 bg-amber-950/40 px-4 py-3 mb-4 text-sm text-amber-100">
+      <strong class="text-amber-200">Demo markets only.</strong>
+      The last successful <strong>Sync markets</strong> used the offline JSON fixture (Polymarket’s API was unreachable — often network, firewall, or HTTP errors).
+      You only have two fake “Exampleland” markets, so matches look like a <strong>smoke test</strong> and real paper trades are unlikely.
+      Fix connectivity to <code class="text-amber-300/90">gamma-api.polymarket.com</code> / CLOB, check the server terminal for warnings, then click <strong>Sync markets</strong> again.
+    </div>
+  {% endif %}
   <p class="text-slate-400 text-sm mb-4 border-l-2 border-slate-600 pl-3">
     A <strong class="text-slate-200">signal</strong> is created when a news article matches a market.
     <strong class="text-slate-200">ACT</strong> = passed all quality gates, a paper trade was simulated.
