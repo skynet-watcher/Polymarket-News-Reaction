@@ -230,47 +230,43 @@ async def _fetch_crypto_candidates(
     include_resolved: bool,
     min_liquidity: Optional[float],
 ) -> list[dict[str, Any]]:
-    """Pull candidate markets from Gamma. Returns raw market dicts."""
+    """
+    Pull candidate markets from Gamma using targeted keyword searches.
+    The Gamma API `category` filter is unreliable; instead we run multiple
+    specific keyword searches that match Up/Down candle market titles.
+    """
     candidates: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
 
-    # Keyword searches that should surface Up/Down crypto markets
-    keyword_queries = ["up or down", "higher or lower", "up in the next", "crypto up"]
+    # These phrases appear in the title of real Polymarket Up/Down candle markets.
+    # Use `q` (full-text search) which the Gamma API actually supports.
+    keyword_queries = [
+        "up or down",
+        "higher or lower",
+        "BTC up",
+        "ETH up",
+        "SOL up",
+        "bitcoin up",
+        "ethereum up",
+        "solana up",
+        "crypto up",
+        "will BTC",
+        "will ETH",
+        "will bitcoin",
+        "will ethereum",
+    ]
+
+    base_params: dict[str, Any] = {"active": "true", "limit": 50}
+    if not include_resolved:
+        base_params["closed"] = "false"
 
     async with polymarket_async_client() as client:
-        # First: crypto category, flat markets endpoint (has tokenIds)
-        try:
-            params: dict[str, Any] = {
-                "category": "crypto",
-                "limit": limit,
-                "active": "true",
-            }
-            if not include_resolved:
-                params["closed"] = "false"
-            if min_liquidity:
-                params["liquidity_min"] = min_liquidity
-
-            r = await client.get(f"{_GAMMA_BASE}/markets", params=params)
-            if r.status_code == 200:
-                data = r.json()
-                if isinstance(data, list):
-                    for m in data:
-                        mid = str(m.get("id") or "").strip()
-                        if mid and mid not in seen_ids:
-                            seen_ids.add(mid)
-                            candidates.append(m)
-        except Exception:
-            logger.exception("crypto_preflight: Gamma /markets category=crypto failed")
-
-        # Second: keyword search passes
         for kw in keyword_queries:
-            if len(candidates) >= limit * 2:
+            if len(candidates) >= limit * 4:
                 break
             try:
-                r = await client.get(
-                    f"{_GAMMA_BASE}/markets",
-                    params={"_c": kw, "limit": min(50, limit), "active": "true"},
-                )
+                params = {**base_params, "q": kw}
+                r = await client.get(f"{_GAMMA_BASE}/markets", params=params)
                 if r.status_code == 200:
                     data = r.json()
                     if isinstance(data, list):
@@ -282,20 +278,25 @@ async def _fetch_crypto_candidates(
             except Exception:
                 logger.warning("crypto_preflight: keyword query '%s' failed", kw)
 
-    logger.info("crypto_preflight: fetched %d candidate markets", len(candidates))
-    return candidates[:limit * 3]  # cap before filtering
+    logger.info("crypto_preflight: fetched %d candidate markets across %d keyword queries", len(candidates), len(keyword_queries))
+    return candidates
 
 
 def _is_crypto_updown_candidate(m: dict[str, Any]) -> bool:
-    """Quick heuristic filter before full classification."""
+    """
+    Quick heuristic filter before full classification.
+    Only pass true Up/Down candle markets — NOT price-threshold markets
+    (e.g. 'Will BTC hit $1m') which are unsupported by this strategy.
+    """
     title = str(m.get("question") or m.get("title") or "").lower()
     slug = str(m.get("slug") or "").lower()
     combined = f"{title} {slug}"
     asset, _ = _detect_asset(combined)
     if not asset:
         return False
-    # Must have some binary up/down signal
-    return bool(_UP_DOWN_RE.search(combined)) or bool(_DAILY_COMP_RE.search(combined)) or bool(_PRICE_THRESH_RE.search(combined))
+    # Must have an explicit up/down or daily-comparison signal.
+    # Do NOT include _PRICE_THRESH_RE — those are long-dated threshold markets.
+    return bool(_UP_DOWN_RE.search(combined)) or bool(_DAILY_COMP_RE.search(combined))
 
 
 async def _verify_binance_kline(
