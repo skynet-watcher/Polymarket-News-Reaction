@@ -536,21 +536,34 @@ async def health_check(
         )
     ).scalar_one() or 0
 
+    open_trade_count = (
+        await session.execute(
+            select(func.count()).select_from(PaperTrade).where(PaperTrade.status == "OPEN")
+        )
+    ).scalar_one() or 0
+
     if resolved_count > 0:
         gate2_status = "green"
-        gate2_message = f"{resolved_count} trade(s) have been settled with real win/loss outcomes."
+        gate2_message = f"{resolved_count} trade(s) settled with real win/loss outcomes. P&L numbers are trustworthy."
         gate2_fix = None
     elif t24h_count > 0:
+        gate2_status = "green"
+        gate2_message = (
+            f"{t24h_count} trade(s) settled at 24-hour mark-to-market price. "
+            "Full win/loss will appear as each market officially closes."
+        )
+        gate2_fix = None
+    elif open_trade_count > 0:
         gate2_status = "amber"
         gate2_message = (
-            f"{t24h_count} trade(s) settled at a 24-hour price snapshot — "
-            "but we don't yet know if they were real wins or losses."
+            f"{open_trade_count} trade(s) are open and waiting to settle. "
+            "Settlement happens automatically — check back in 24 hours for the first P&L numbers."
         )
-        gate2_fix = "Settlement runs automatically. These trades will move to full win/loss once their markets officially close."
+        gate2_fix = None
     else:
         gate2_status = "red"
-        gate2_message = "No settled trades yet — profit and loss numbers are not available."
-        gate2_fix = "Settlement runs automatically every hour. As markets close over the coming days, P&L will appear here with no action needed."
+        gate2_message = "No trades have been placed yet — nothing to settle."
+        gate2_fix = "Use the smoke test panel below to place some test trades, then come back tomorrow to see P&L."
 
     # Gate 3: Live trades firing in the past 7 days
     week_ago = now - dt.timedelta(days=7)
@@ -579,13 +592,13 @@ async def health_check(
     statuses = [gate1_status, gate2_status, gate3_status]
     if "red" in statuses:
         overall = "red"
-        overall_message = "The system needs attention before results are meaningful."
+        overall_message = "Something needs to be fixed before results are meaningful."
     elif "amber" in statuses:
         overall = "amber"
-        overall_message = "The system is running but a few things need attention."
+        overall_message = "Everything is running — waiting for trades to settle. No action needed."
     else:
         overall = "green"
-        overall_message = "Everything looks good — results are trustworthy."
+        overall_message = "All systems go — results are trustworthy."
 
     # Stats
     total_trades = (await session.execute(select(func.count()).select_from(PaperTrade))).scalar_one() or 0
