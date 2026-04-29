@@ -1,16 +1,25 @@
-.PHONY: run run-dev run-realtime test
+.PHONY: run run-dev run-realtime test setup
+
+PYTHON := .venv/bin/python
+
+# First-time setup: create venv, install deps, create required dirs.
+setup:
+	python3 -m venv .venv
+	.venv/bin/pip install --upgrade pip -q
+	.venv/bin/pip install -r requirements.txt -q
+	mkdir -p app/static
 
 # Hands-off server (no auto-reload). Binds all interfaces so LAN access works.
-run:
-	python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+run: setup
+	$(PYTHON) -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # Faster news → candidates → paper cadence (see README "Realtime paper").
-run-realtime:
-	REALTIME_PAPER_QUICKSTART=1 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+run-realtime: setup
+	REALTIME_PAPER_QUICKSTART=1 $(PYTHON) -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # Local development with auto-reload.
-run-dev:
-	python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+run-dev: setup
+	$(PYTHON) -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 
-test:
-	python -m pytest -q
+test: setup
+	$(PYTHON) -m pytest -q
