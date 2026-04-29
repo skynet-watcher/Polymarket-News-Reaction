@@ -113,31 +113,36 @@ async def run(*, count: int = 20) -> dict[str, Any]:
         if source is None:
             return {"ok": False, "reason": "no_news_source_in_db", "trades_created": 0}
 
-        # ── Select markets — soonest end_date first ───────────────────────────
+        # ── Select markets — soonest FUTURE end_date first ───────────────────
         base_filter = and_(
             Market.active == True,        # noqa: E712
             Market.closed == False,       # noqa: E712
             Market.is_fixture.is_not(True),
         )
 
-        # Bucket 1: markets with a known end_date, soonest first.
+        # Bucket 1: markets closing in the future, soonest first.
         near_expiry = (
             await session.execute(
                 select(Market)
-                .where(and_(base_filter, Market.end_date.is_not(None)))
+                .where(and_(
+                    base_filter,
+                    Market.end_date.is_not(None),
+                    Market.end_date > now,
+                ))
                 .order_by(asc(Market.end_date))
                 .limit(count)
             )
         ).scalars().all()
 
-        # Bucket 2: top-liquidity markets to fill remaining slots.
+        # Bucket 2: top-liquidity markets (no end_date or end_date unknown).
         needed = count - len(near_expiry)
         near_ids = {m.id for m in near_expiry}
         if needed > 0:
+            exclude = and_(base_filter, Market.id.not_in(list(near_ids))) if near_ids else base_filter
             extra = (
                 await session.execute(
                     select(Market)
-                    .where(and_(base_filter, Market.id.not_in(list(near_ids)) if near_ids else base_filter))
+                    .where(exclude)
                     .order_by(desc(Market.liquidity))
                     .limit(needed)
                 )

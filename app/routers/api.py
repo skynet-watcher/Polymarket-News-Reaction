@@ -174,9 +174,13 @@ async def job_bulk_smoke_test(
         reason = out.get("reason", "error")
         return RedirectResponse(url=f"/health?smoke=error&smoke_detail={reason}", status_code=303)
     n = out.get("trades_created", 0)
-    next_s = out.get("next_expected_settlement") or "unknown"
+    next_s = out.get("next_expected_settlement")
+    if next_s:
+        settle_note = f"Earliest+market+close:+{next_s[:10]}"
+    else:
+        settle_note = "P%26L+appears+after+24h+or+on+market+resolution"
     return RedirectResponse(
-        url=f"/health?smoke=bulk_done&smoke_detail={n}+trades+placed.+Earliest+settlement:+{next_s[:10]}",
+        url=f"/health?smoke=bulk_done&smoke_detail={n}+trades+placed.+{settle_note}",
         status_code=303,
     )
 
