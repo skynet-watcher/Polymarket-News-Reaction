@@ -517,11 +517,11 @@ async def health_check(
     elif real_snap_count > 0:
         gate1_status = "amber"
         gate1_message = f"Some price data is flowing ({real_market_count} markets) — still building up."
-        gate1_fix = "Ask Chad to run a market sync and check that new snapshots are appearing."
+        gate1_fix = "Click 'Sync markets' on the Dashboard — price data is still building up."
     else:
         gate1_status = "red"
         gate1_message = "No live market prices yet — the system can't evaluate trades without this."
-        gate1_fix = "Ask Chad: the token ID fix needs to be verified. Run 'Sync markets' from the dashboard."
+        gate1_fix = "Click 'Sync markets' on the Dashboard to fetch live prices."
 
     # Gate 2: Real trade settlement (SETTLED_RESOLVED = actual win/loss from market outcome)
     resolved_count = (
@@ -546,11 +546,11 @@ async def health_check(
             f"{t24h_count} trade(s) settled at a 24-hour price snapshot — "
             "but we don't yet know if they were real wins or losses."
         )
-        gate2_fix = "Ask Chad to wire in the resolution system so trades settle when markets officially close."
+        gate2_fix = "Settlement runs automatically. These trades will move to full win/loss once their markets officially close."
     else:
         gate2_status = "red"
         gate2_message = "No settled trades yet — profit and loss numbers are not available."
-        gate2_fix = "This will resolve once trades are placed (Gate 3) and markets close. Ask Chad for an update."
+        gate2_fix = "Settlement runs automatically every hour. As markets close over the coming days, P&L will appear here with no action needed."
 
     # Gate 3: Live trades firing in the past 7 days
     week_ago = now - dt.timedelta(days=7)
@@ -570,11 +570,11 @@ async def health_check(
     elif live_7d > 0:
         gate3_status = "amber"
         gate3_message = f"Only {live_7d} live paper trade(s) in the past 7 days — the system is being very selective."
-        gate3_fix = "Ask Chad to switch to the 'Research' trading profile in Settings — the current profile is too strict."
+        gate3_fix = "Go to Settings and switch to the 'Research' trading profile — the current profile may be too strict."
     else:
         gate3_status = "red"
         gate3_message = "No live paper trades in the past 7 days — the system isn't acting on any news signals."
-        gate3_fix = "Ask Chad to switch to the 'Research' trading profile in Settings."
+        gate3_fix = "Use the smoke test buttons on this page to place test trades, or go to Settings and switch to the 'Research' trading profile."
 
     statuses = [gate1_status, gate2_status, gate3_status]
     if "red" in statuses:
