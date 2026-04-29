@@ -291,6 +291,32 @@ async def run(
             )
         ).scalar_one_or_none()
 
+        # If the market has no real bid/ask yet (prices still syncing), use
+        # synthetic 0.48/0.52 so the smoke test always produces a trade.
+        snap_has_prices = (
+            latest_snap is not None
+            and latest_snap.best_bid_yes is not None
+            and latest_snap.best_ask_yes is not None
+        )
+        market_has_prices = (
+            btc_market.best_bid_yes is not None
+            and btc_market.best_ask_yes is not None
+        )
+        if not snap_has_prices and not market_has_prices:
+            # Create an in-memory snapshot with neutral 50/50 prices.
+            # Not added to the session — used only for sizing the trade.
+            latest_snap = PriceSnapshot(
+                id="smoke_synthetic",
+                market_id=btc_market.id,
+                timestamp=now,
+                mid_yes=0.50,
+                best_bid_yes=0.48,
+                best_ask_yes=0.52,
+                spread=0.04,
+                liquidity=1000.0,
+                data_quality="SMOKE_TEST",
+            )
+
         # ── 9. Place the paper trade ──────────────────────────────────────────
         trade = maybe_paper_trade(
             market=btc_market,

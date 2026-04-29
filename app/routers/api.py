@@ -170,7 +170,7 @@ async def job_btc_signal_test(
     Set force=true to always fire a trade on the next click.
     """
     out = await btc_signal_test.run(move_threshold_pct=move_threshold_pct, force=force)
-    return _job_response(request, out, "/trades")
+    return _job_response(request, out, "/health")
 
 
 @router.post("/jobs/compute_signal_metrics", response_model=None)
