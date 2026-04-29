@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="space-y-6">
+
+  <!-- ── Page header ─────────────────────────────────────────────────────── -->
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl font-bold text-white">⚡ Crypto Market Preflight Scanner</h1>
+      <p class="text-slate-400 mt-1 text-sm max-w-2xl">
+        Scans active Polymarket crypto markets, figures out the candle parameters, verifies the
+        open price against Binance, and checks that both YES and NO orderbooks have enough
+        liquidity to trade. Green = ready to monitor, everything else tells you exactly what's missing.
+      </p>
+    </div>
+    <div class="flex flex-col items-end gap-2">
+      <form class="js-async-job" method="post" action="/api/jobs/crypto_preflight"
+            data-job-label="Crypto preflight scan" data-done-url="/analysis/crypto-preflight">
+        <button type="submit"
+          class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold whitespace-nowrap">
+          🔍 Run preflight scan now
+        </button>
+      </form>
+      {% if last_run %}
+        <span class="text-xs text-slate-500">Last scan: {{ last_run }}</span>
+      {% else %}
+        <span class="text-xs text-slate-500">Never scanned — run the scan to populate this page.</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── What this does explainer ────────────────────────────────────────── -->
+  <div class="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm text-slate-300 space-y-2">
+    <p class="font-semibold text-slate-200">How to read this page</p>
+    <ul class="list-disc ml-5 space-y-1 text-slate-400">
+      <li><span class="text-green-400 font-semibold">✅ Ready</span> — Parser understood the market rule, Binance confirms the opening price, and both YES/NO books have enough liquidity. This market is ready to trade against.</li>
+      <li><span class="text-amber-400 font-semibold">⏳ Future candle</span> — The candle hasn't started yet so Binance has no data. It will become tradeable once the candle opens.</li>
+      <li><span class="text-amber-400 font-semibold">📭 No orderbook</span> — Parsed correctly and Binance is fine, but the Polymarket orderbook for YES or NO doesn't have enough liquidity right now.</li>
+      <li><span class="text-yellow-400 font-semibold">🔍 Needs review</span> — The parser couldn't confidently extract the candle interval or asset. These markets need a human to check the rule text.</li>
+      <li><span class="text-slate-400 font-semibold">⛔ Unsupported</span> — Not an Up/Down candle market (e.g. price threshold, all-time high). Not tradeable with this strategy.</li>
+    </ul>
+  </div>
+
+  <!-- ── Summary cards ───────────────────────────────────────────────────── -->
+  {% if counts.total == 0 %}
+  <div class="bg-slate-800 border border-slate-700 rounded-lg p-8 text-center text-slate-400">
+    <p class="text-4xl mb-3">📭</p>
+    <p class="font-semibold text-slate-300 text-lg">No markets scanned yet</p>
+    <p class="text-sm mt-1">Hit "Run preflight scan now" above to fetch and analyse live Polymarket crypto markets.</p>
+  </div>
+  {% else %}
+
+  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+    <div class="bg-slate-900 rounded-lg p-4 border border-slate-700 text-center">
+      <div class="text-3xl font-bold text-slate-100">{{ counts.total }}</div>
+      <div class="text-xs text-slate-400 mt-1">Total scanned</div>
+    </div>
+    <div class="bg-green-950 rounded-lg p-4 border border-green-800 text-center">
+      <div class="text-3xl font-bold text-green-300">{{ counts.ready }}</div>
+      <div class="text-xs text-green-400 mt-1">✅ Ready to trade</div>
+    </div>
+    <div class="bg-amber-950 rounded-lg p-4 border border-amber-800 text-center">
+      <div class="text-3xl font-bold text-amber-300">{{ counts.future + counts.no_orderbook }}</div>
+      <div class="text-xs text-amber-400 mt-1">⏳ Waiting (liquidity / timing)</div>
+    </div>
+    <div class="bg-yellow-950 rounded-lg p-4 border border-yellow-800 text-center">
+      <div class="text-3xl font-bold text-yellow-300">{{ counts.review }}</div>
+      <div class="text-xs text-yellow-400 mt-1">🔍 Needs review</div>
+    </div>
+    <div class="bg-slate-900 rounded-lg p-4 border border-slate-700 text-center">
+      <div class="text-3xl font-bold text-slate-400">{{ counts.unsupported }}</div>
+      <div class="text-xs text-slate-500 mt-1">⛔ Unsupported type</div>
+    </div>
+    <div class="bg-slate-900 rounded-lg p-4 border border-slate-700 text-center">
+      <div class="text-3xl font-bold text-slate-400">{{ counts.unknown }}</div>
+      <div class="text-xs text-slate-500 mt-1">❓ Unknown</div>
+    </div>
+  </div>
+
+  <!-- ── Ready markets (highlighted first) ────────────────────────────────── -->
+  {% set ready_rows = rows | selectattr("monitor_status", "equalto", "READY") | list %}
+  {% if ready_rows %}
+  <div>
+    <h2 class="text-lg font-semibold text-green-300 mb-3">✅ Markets ready to trade ({{ ready_rows | length }})</h2>
+    <div class="space-y-2">
+      {% for r in ready_rows %}
+      <div class="bg-green-950 border border-green-800 rounded-lg p-4">
+        <div class="flex items-start justify-between gap-2 flex-wrap">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-white truncate" title="{{ r.title }}">{{ r.title }}</p>
+            <div class="flex flex-wrap gap-3 mt-1 text-xs text-green-300">
+              <span>📈 {{ r.binance_symbol or '?' }}</span>
+              <span>🕯️ {{ r.candle_interval or '?' }} candle</span>
+              {% if r.candle_start %}<span>📅 Opens: {{ r.candle_start }}</span>{% endif %}
+              {% if r.binance_open_price %}<span>💲 Open: ${{ "%.4f"|format(r.binance_open_price) }}</span>{% endif %}
+              {% if r.yes_liquidity is not none %}<span>YES liq: ${{ "%.0f"|format(r.yes_liquidity) }}</span>{% endif %}
+              {% if r.no_liquidity is not none %}<span>NO liq: ${{ "%.0f"|format(r.no_liquidity) }}</span>{% endif %}
+            </div>
+          </div>
+          <div class="flex flex-col items-end gap-1">
+            {% if r.polymarket_url %}
+            <a href="{{ r.polymarket_url }}" target="_blank"
+               class="text-xs text-indigo-400 hover:text-indigo-300 underline">View on Polymarket ↗</a>
+            {% endif %}
+            {% if r.parser_confidence is not none %}
+            <span class="text-xs text-slate-400">Parser confidence: {{ r.parser_confidence }}%</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── All results table ─────────────────────────────────────────────────── -->
+  <div>
+    <h2 class="text-lg font-semibold text-slate-200 mb-3">All scanned markets ({{ rows | length }})</h2>
+    <div class="overflow-x-auto rounded-lg border border-slate-700">
+      <table class="w-full text-xs text-left">
+        <thead class="bg-slate-800 text-slate-400 uppercase text-[10px] tracking-wide">
+          <tr>
+            <th class="px-3 py-2">Status</th>
+            <th class="px-3 py-2">Market</th>
+            <th class="px-3 py-2">Asset</th>
+            <th class="px-3 py-2">Interval</th>
+            <th class="px-3 py-2">Binance</th>
+            <th class="px-3 py-2">YES book</th>
+            <th class="px-3 py-2">NO book</th>
+            <th class="px-3 py-2">Parser %</th>
+            <th class="px-3 py-2">Notes</th>
+            <th class="px-3 py-2">Updated</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% for r in rows %}
+          {% set bg = {
+            "green": "bg-green-950/40",
+            "amber": "bg-amber-950/40",
+            "yellow": "bg-yellow-950/30",
+            "slate": "bg-slate-900/40"
+          }[r.status_color] %}
+          <tr class="{{ bg }} hover:bg-slate-800/60 transition-colors">
+            <td class="px-3 py-2 whitespace-nowrap">
+              <span class="font-medium">{{ r.status_label }}</span>
+            </td>
+            <td class="px-3 py-2 max-w-xs">
+              <span class="block truncate text-slate-200" title="{{ r.title }}">{{ r.title }}</span>
+              {% if r.polymarket_url %}
+              <a href="{{ r.polymarket_url }}" target="_blank" class="text-indigo-400 hover:underline text-[10px]">Polymarket ↗</a>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2 whitespace-nowrap text-slate-300">{{ r.base_asset or '—' }}</td>
+            <td class="px-3 py-2 whitespace-nowrap text-slate-300">
+              {{ r.candle_interval or '—' }}
+              {% if r.candle_start %}
+              <div class="text-slate-500 text-[10px]">{{ r.candle_start }}</div>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2 whitespace-nowrap">
+              {% if r.binance_verified %}
+                <span class="text-green-400 font-semibold">✓ verified</span>
+                {% if r.binance_open_price %}
+                <div class="text-slate-400">${{ "%.4f"|format(r.binance_open_price) }}</div>
+                {% endif %}
+              {% elif r.monitor_status == "FUTURE_CANDLE" %}
+                <span class="text-amber-400">⏳ not yet open</span>
+              {% elif r.binance_symbol %}
+                <span class="text-red-400">✗ mismatch</span>
+                {% if r.binance_notes %}
+                <div class="text-slate-500 text-[10px] max-w-[120px] truncate" title="{{ r.binance_notes }}">{{ r.binance_notes }}</div>
+                {% endif %}
+              {% else %}
+                <span class="text-slate-500">—</span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2 whitespace-nowrap">
+              {% if r.yes_book_usable %}
+                <span class="text-green-400">✓</span>
+                {% if r.yes_liquidity is not none %}
+                <span class="text-slate-400">${{ "%.0f"|format(r.yes_liquidity) }}</span>
+                {% endif %}
+              {% elif r.yes_liquidity is not none %}
+                <span class="text-red-400">✗</span>
+                <span class="text-slate-500">${{ "%.0f"|format(r.yes_liquidity) }}</span>
+              {% else %}
+                <span class="text-slate-600">—</span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2 whitespace-nowrap">
+              {% if r.no_book_usable %}
+                <span class="text-green-400">✓</span>
+                {% if r.no_liquidity is not none %}
+                <span class="text-slate-400">${{ "%.0f"|format(r.no_liquidity) }}</span>
+                {% endif %}
+              {% elif r.no_liquidity is not none %}
+                <span class="text-red-400">✗</span>
+                <span class="text-slate-500">${{ "%.0f"|format(r.no_liquidity) }}</span>
+              {% else %}
+                <span class="text-slate-600">—</span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2 whitespace-nowrap">
+              {% if r.parser_confidence is not none %}
+                {% if r.parser_confidence >= 75 %}
+                  <span class="text-green-400 font-semibold">{{ r.parser_confidence }}%</span>
+                {% elif r.parser_confidence >= 50 %}
+                  <span class="text-yellow-400">{{ r.parser_confidence }}%</span>
+                {% else %}
+                  <span class="text-red-400">{{ r.parser_confidence }}%</span>
+                {% endif %}
+              {% else %}
+                <span class="text-slate-600">—</span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2 max-w-[200px]">
+              {% set note_parts = [] %}
+              {% if r.parser_notes %}{% set _ = note_parts.append(r.parser_notes) %}{% endif %}
+              {% if r.orderbook_notes %}{% set _ = note_parts.append(r.orderbook_notes) %}{% endif %}
+              {% if note_parts %}
+              <span class="text-slate-400 block truncate" title="{{ note_parts | join(' | ') }}">{{ note_parts | join(' | ') }}</span>
+              {% else %}
+              <span class="text-slate-600">—</span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2 whitespace-nowrap text-slate-500">{{ r.updated_at or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% endif %}{# end if counts.total == 0 #}
+
+</div>
+{% endblock %}

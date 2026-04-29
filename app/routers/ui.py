@@ -16,6 +16,7 @@ from app.job_status import build_system_status
 from app.models import (
     BacktestCase,
     BacktestRun,
+    CryptoMarketProfile,
     LagMeasurement,
     LagThresholdCrossing,
     Market,
@@ -685,6 +686,99 @@ async def health_check(
             "last_price_sync": _ago(last_snap_time),
             "smoke": smoke,
             "smoke_detail": smoke_detail,
+        },
+    )
+
+
+@router.get("/analysis/crypto-preflight", response_class=HTMLResponse)
+async def crypto_preflight_page(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    """Crypto Market Preflight Scanner — Eric-friendly traffic-light view."""
+    profiles = (
+        await session.execute(
+            select(CryptoMarketProfile).order_by(
+                CryptoMarketProfile.monitor_ready.desc(),
+                CryptoMarketProfile.parser_confidence.desc().nulls_last(),
+                CryptoMarketProfile.updated_at.desc(),
+            )
+        )
+    ).scalars().all()
+
+    counts = {
+        "total": len(profiles),
+        "ready": sum(1 for p in profiles if p.monitor_status == "READY"),
+        "review": sum(1 for p in profiles if p.monitor_status == "PARSER_REVIEW_REQUIRED"),
+        "no_orderbook": sum(1 for p in profiles if p.monitor_status == "NO_ORDERBOOK"),
+        "future": sum(1 for p in profiles if p.monitor_status == "FUTURE_CANDLE"),
+        "unsupported": sum(1 for p in profiles if p.monitor_status == "UNSUPPORTED"),
+        "unknown": sum(1 for p in profiles if p.monitor_status == "UNKNOWN"),
+    }
+
+    last_run: Optional[dt.datetime] = None
+    if profiles:
+        last_run = max((p.updated_at for p in profiles), default=None)
+
+    def _status_label(p: CryptoMarketProfile) -> str:
+        m = p.monitor_status or "UNKNOWN"
+        return {
+            "READY": "✅ Ready",
+            "FUTURE_CANDLE": "⏳ Future candle",
+            "NO_ORDERBOOK": "📭 No orderbook",
+            "PARSER_REVIEW_REQUIRED": "🔍 Needs review",
+            "UNSUPPORTED": "⛔ Unsupported",
+            "UNKNOWN": "❓ Unknown",
+        }.get(m, m)
+
+    def _status_color(p: CryptoMarketProfile) -> str:
+        m = p.monitor_status or "UNKNOWN"
+        return {
+            "READY": "green",
+            "FUTURE_CANDLE": "amber",
+            "NO_ORDERBOOK": "amber",
+            "PARSER_REVIEW_REQUIRED": "yellow",
+            "UNSUPPORTED": "slate",
+            "UNKNOWN": "slate",
+        }.get(m, "slate")
+
+    rows = []
+    for p in profiles:
+        rows.append({
+            "id": p.id,
+            "market_id": p.market_id,
+            "title": (p.title or "")[:90],
+            "rule_family": p.rule_family or "UNKNOWN",
+            "base_asset": p.base_asset,
+            "binance_symbol": p.binance_symbol,
+            "candle_interval": p.candle_interval,
+            "candle_start": p.candle_start_time_utc.strftime("%Y-%m-%d %H:%M UTC") if p.candle_start_time_utc else None,
+            "candle_close": p.candle_close_time_utc.strftime("%Y-%m-%d %H:%M UTC") if p.candle_close_time_utc else None,
+            "parser_confidence": round(p.parser_confidence * 100) if p.parser_confidence is not None else None,
+            "parser_status": p.parser_status,
+            "parser_notes": p.parser_notes,
+            "binance_verified": p.binance_verified,
+            "binance_open_price": p.binance_open_price,
+            "binance_close_price": p.binance_close_price,
+            "binance_notes": p.binance_verification_notes,
+            "yes_book_usable": p.yes_book_usable,
+            "no_book_usable": p.no_book_usable,
+            "yes_liquidity": p.yes_liquidity,
+            "no_liquidity": p.no_liquidity,
+            "yes_best_ask": p.yes_best_ask,
+            "monitor_status": p.monitor_status,
+            "monitor_ready": p.monitor_ready,
+            "status_label": _status_label(p),
+            "status_color": _status_color(p),
+            "orderbook_notes": p.orderbook_notes,
+            "updated_at": p.updated_at.strftime("%Y-%m-%d %H:%M UTC") if p.updated_at else None,
+            "polymarket_url": f"https://polymarket.com/event/{p.slug}" if p.slug else None,
+        })
+
+    return templates.TemplateResponse(
+        "crypto_preflight.html",
+        {
+            "request": request,
+            "counts": counts,
+            "rows": rows,
+            "last_run": last_run.strftime("%Y-%m-%d %H:%M UTC") if last_run else None,
         },
     )
 

@@ -540,6 +540,78 @@ class BacktestEventLog(Base):
     case: Mapped[Optional["BacktestCase"]] = relationship(back_populates="events")
 
 
+class CryptoMarketProfile(Base):
+    """
+    Result of a crypto preflight scan for one Polymarket market.
+    One row per market_id; upserted on each preflight run.
+    """
+
+    __tablename__ = "crypto_market_profiles"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    market_id: Mapped[str] = mapped_column(String, unique=True, index=True)
+    slug: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    title: Mapped[str] = mapped_column(Text)
+    rule_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resolution_source_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    end_date: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    outcomes_json: Mapped[Optional[List]] = mapped_column(JSON, nullable=True)
+    token_ids_json: Mapped[Optional[List]] = mapped_column(JSON, nullable=True)
+    raw_gamma_json: Mapped[Optional[Dict]] = mapped_column(JSON, nullable=True)
+
+    # ── Classification ───────────────────────────────────────────────────
+    # CRYPTO_INTRAPERIOD_UP_DOWN | CRYPTO_DAILY_COMPARISON |
+    # CRYPTO_PRICE_ABOVE_BELOW   | CRYPTO_HIT_HIGH_LOW | UNKNOWN
+    rule_family: Mapped[str] = mapped_column(String, default="UNKNOWN", index=True)
+    classification_confidence: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # ── Parsed fields (CRYPTO_INTRAPERIOD_UP_DOWN only) ──────────────────
+    base_asset: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    quote_asset: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    binance_symbol: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    candle_interval: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    candle_interval_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    candle_start_time_utc: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    candle_close_time_utc: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    yes_token_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    no_token_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    parser_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    parser_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # PARSED | PARSER_REVIEW_REQUIRED | UNSUPPORTED | N_A
+    parser_status: Mapped[str] = mapped_column(String, default="N_A")
+
+    # ── Binance kline verification ────────────────────────────────────────
+    binance_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    binance_open_time_utc: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    binance_open_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    binance_close_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    binance_verification_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── Orderbook ────────────────────────────────────────────────────────
+    yes_book_usable: Mapped[bool] = mapped_column(Boolean, default=False)
+    no_book_usable: Mapped[bool] = mapped_column(Boolean, default=False)
+    yes_best_ask: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    no_best_ask: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    yes_liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    no_liquidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    orderbook_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── Overall readiness ────────────────────────────────────────────────
+    # READY | PARSER_REVIEW_REQUIRED | UNSUPPORTED | NO_ORDERBOOK |
+    # BINANCE_MISMATCH | FUTURE_CANDLE | UNKNOWN
+    monitor_status: Mapped[str] = mapped_column(String, default="UNKNOWN", index=True)
+    monitor_ready: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc)
+    )
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: dt.datetime.now(dt.timezone.utc),
+        onupdate=lambda: dt.datetime.now(dt.timezone.utc),
+    )
+
+
 class AuditLog(Base):
     """
     FUTURE STATE — not wired to any execution path yet.

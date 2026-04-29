@@ -14,7 +14,7 @@ from app.db import SessionLocal, get_session
 from app.job_status import build_system_status, run_tracked_job
 from app.settings import settings
 from app.util import now_utc
-from app.jobs import backtest_news_reactions, btc_signal_test, bulk_smoke_test, compute_lag, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
+from app.jobs import backtest_news_reactions, btc_signal_test, bulk_smoke_test, compute_lag, crypto_preflight, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
 from app.live_feeds import ensure_live_news_sources
 from sqlalchemy import desc, select
 
@@ -226,6 +226,21 @@ async def job_compute_signal_metrics(request: Request, session: AsyncSession = D
 async def job_compute_lag_ranks(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
     out = await run_tracked_job(session, "lag_ranks", lambda: lag_rank.run(session))
     return _job_response(request, out, "/analysis/laggy-markets")
+
+
+@router.post("/jobs/crypto_preflight", response_model=None)
+async def job_crypto_preflight(
+    request: Request,
+    market_limit: int = Query(25, ge=1, le=100, description="Max markets to scan"),
+    include_resolved: bool = Query(False, description="Include already-resolved markets"),
+) -> Union[JSONResponse, RedirectResponse]:
+    """
+    Crypto Market Preflight Scanner.
+    Fetches active Polymarket crypto markets, classifies rule family,
+    parses candle parameters, verifies against Binance, checks orderbooks.
+    """
+    out = await crypto_preflight.run(market_limit=market_limit, include_resolved=include_resolved)
+    return _job_response(request, out, "/analysis/crypto-preflight")
 
 
 @router.get("/lag-measurements")
