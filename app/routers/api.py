@@ -170,7 +170,23 @@ async def job_btc_signal_test(
     Set force=true to always fire a trade on the next click.
     """
     out = await btc_signal_test.run(move_threshold_pct=move_threshold_pct, force=force)
-    return _job_response(request, out, "/health")
+    if _wants_json(request):
+        return JSONResponse(out)
+    reason = out.get("reason", "")
+    if out.get("trade_created"):
+        redirect = f"/health?smoke=trade_created&smoke_detail={out.get('market_question','')[:80]}"
+    elif reason == "first_run_reference_saved":
+        redirect = "/health?smoke=first_run"
+    elif reason == "move_below_threshold":
+        pct = abs(out.get("pct_move", 0))
+        redirect = f"/health?smoke=no_move&smoke_detail=BTC+moved+only+{pct:.2f}%25"
+    elif reason == "no_open_markets_in_db":
+        redirect = "/health?smoke=no_markets"
+    elif reason == "binance_fetch_failed":
+        redirect = "/health?smoke=binance_error"
+    else:
+        redirect = "/health?smoke=error"
+    return RedirectResponse(url=redirect, status_code=303)
 
 
 @router.post("/jobs/compute_signal_metrics", response_model=None)

@@ -11,6 +11,57 @@
                   else "Needs attention" if overall == "amber"
                   else "Action required" %}
 
+{# ── Smoke test result banner ────────────────────────────────────────── #}
+{% if smoke %}
+  {% if smoke == "trade_created" %}
+    <div class="rounded border border-emerald-600 bg-emerald-900 px-5 py-3 mb-6 flex items-center gap-3">
+      <span class="text-xl">✅</span>
+      <div>
+        <div class="font-semibold text-emerald-300 text-sm">Trade placed successfully!</div>
+        {% if smoke_detail %}<div class="text-xs text-emerald-400 mt-0.5">Market: {{ smoke_detail }}</div>{% endif %}
+        <div class="text-xs text-emerald-500 mt-0.5">Check the Paper Trades page to see it. Gate 3 will turn green on the next refresh.</div>
+      </div>
+    </div>
+  {% elif smoke == "first_run" %}
+    <div class="rounded border border-indigo-600 bg-indigo-900 px-5 py-3 mb-6 flex items-center gap-3">
+      <span class="text-xl">📌</span>
+      <div>
+        <div class="font-semibold text-indigo-300 text-sm">BTC reference price saved</div>
+        <div class="text-xs text-indigo-400 mt-0.5">This was the first click — it saved today's BTC price as a baseline. Click again in a few minutes to compare, or use the green <strong>Force a test trade now</strong> button to place a trade immediately.</div>
+      </div>
+    </div>
+  {% elif smoke == "no_move" %}
+    <div class="rounded border border-amber-600 bg-amber-900 px-5 py-3 mb-6 flex items-center gap-3">
+      <span class="text-xl">📊</span>
+      <div>
+        <div class="font-semibold text-amber-300 text-sm">BTC hasn't moved enough yet</div>
+        <div class="text-xs text-amber-400 mt-0.5">{{ smoke_detail }}. Use the green <strong>Force a test trade now</strong> button to place a trade regardless.</div>
+      </div>
+    </div>
+  {% elif smoke == "no_markets" %}
+    <div class="rounded border border-red-600 bg-red-900 px-5 py-3 mb-6 flex items-center gap-3">
+      <span class="text-xl">⚠️</span>
+      <div>
+        <div class="font-semibold text-red-300 text-sm">No open markets in database</div>
+        <div class="text-xs text-red-400 mt-0.5">Click <strong>Sync Markets</strong> on the Dashboard first to load markets from Polymarket.</div>
+      </div>
+    </div>
+  {% elif smoke == "binance_error" %}
+    <div class="rounded border border-red-600 bg-red-900 px-5 py-3 mb-6 flex items-center gap-3">
+      <span class="text-xl">⚠️</span>
+      <div>
+        <div class="font-semibold text-red-300 text-sm">Could not reach Binance</div>
+        <div class="text-xs text-red-400 mt-0.5">Check internet connection and try again.</div>
+      </div>
+    </div>
+  {% else %}
+    <div class="rounded border border-red-600 bg-red-900 px-5 py-3 mb-6 flex items-center gap-3">
+      <span class="text-xl">⚠️</span>
+      <div class="font-semibold text-red-300 text-sm">Something went wrong — check the terminal for details.</div>
+    </div>
+  {% endif %}
+{% endif %}
+
 {# ── Overall banner ─────────────────────────────────────────────────── #}
 <div class="rounded border {{ overall_bg }} px-6 py-5 mb-8 flex items-center gap-4">
   <div class="text-4xl leading-none">

@@ -478,7 +478,12 @@ async def laggy_markets_page(request: Request, session: AsyncSession = Depends(g
 
 
 @router.get("/health", response_class=HTMLResponse)
-async def health_check(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+async def health_check(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    smoke: Optional[str] = Query(None),
+    smoke_detail: Optional[str] = Query(None),
+) -> HTMLResponse:
     now = now_utc()
 
     # Gate 1: Real price data flowing — exclude fixture markets and pre-fix snapshots
@@ -665,6 +670,8 @@ async def health_check(request: Request, session: AsyncSession = Depends(get_ses
             },
             "last_news_check": _ago(last_article_time),
             "last_price_sync": _ago(last_snap_time),
+            "smoke": smoke,
+            "smoke_detail": smoke_detail,
         },
     )
 
