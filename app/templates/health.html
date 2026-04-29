@@ -128,6 +128,37 @@
 
 </div>
 
+{# ── BTC smoke test ──────────────────────────────────────────────────── #}
+<div class="rounded bg-slate-900 border border-indigo-700 p-5 mb-8">
+  <div class="flex items-start gap-4 flex-wrap">
+    <div class="flex-1 min-w-0">
+      <div class="font-semibold text-slate-100 text-sm mb-1">
+        🧪 Pipeline Smoke Test — BTC Price Signal
+      </div>
+      <div class="text-xs text-slate-400 leading-relaxed">
+        Not seeing any trades? Use this to check the trade pipeline directly — no news feeds or AI needed.
+        It watches Bitcoin's price on Binance. If BTC moved ≥ 0.5% since the last check, it places a
+        paper trade on the most liquid open market. Click <strong class="text-slate-200">Force a test trade now</strong>
+        to fire one immediately regardless of price movement.
+      </div>
+    </div>
+    <div class="flex flex-col gap-2 shrink-0">
+      <form method="post" action="/api/jobs/btc_signal_test">
+        <button type="submit"
+          class="block w-full text-center text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white rounded px-4 py-2 transition">
+          Check BTC price signal
+        </button>
+      </form>
+      <form method="post" action="/api/jobs/btc_signal_test?force=true">
+        <button type="submit"
+          class="block w-full text-center text-xs font-semibold bg-emerald-700 hover:bg-emerald-600 text-white rounded px-4 py-2 transition">
+          Force a test trade now
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
 {# ── System info ─────────────────────────────────────────────────────── #}
 <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
 

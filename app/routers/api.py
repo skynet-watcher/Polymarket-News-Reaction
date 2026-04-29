@@ -14,7 +14,7 @@ from app.db import SessionLocal, get_session
 from app.job_status import build_system_status, run_tracked_job
 from app.settings import settings
 from app.util import now_utc
-from app.jobs import backtest_news_reactions, compute_lag, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
+from app.jobs import backtest_news_reactions, btc_signal_test, compute_lag, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
 from app.live_feeds import ensure_live_news_sources
 from sqlalchemy import desc, select
 
@@ -156,6 +156,21 @@ async def export_summary(session: AsyncSession = Depends(get_session)) -> dict[s
         "dashboard": snap,
         "system_status": rows,
     }
+
+
+@router.post("/jobs/btc_signal_test", response_model=None)
+async def job_btc_signal_test(
+    request: Request,
+    move_threshold_pct: float = Query(0.5, ge=0.0, le=50.0, description="Min BTC move % to fire a trade"),
+    force: bool = Query(False, description="Force a trade regardless of price move (pipeline smoke test)"),
+) -> Union[JSONResponse, RedirectResponse]:
+    """
+    BTC smoke-test: place a paper trade based on live Binance price movement.
+    Bypasses news feeds and LLM — use this to verify the trade pipeline is wired up.
+    Set force=true to always fire a trade on the next click.
+    """
+    out = await btc_signal_test.run(move_threshold_pct=move_threshold_pct, force=force)
+    return _job_response(request, out, "/trades")
 
 
 @router.post("/jobs/compute_signal_metrics", response_model=None)

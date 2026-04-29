@@ -98,14 +98,14 @@ Return ONLY a JSON array — one object per market, in the same order:
 
     body = {
         "model": settings.openai_model_interpreter,
-        "input": prompt,
+        "messages": [{"role": "user", "content": prompt}],
         "response_format": {"type": "json_object"},
     }
 
     trust = settings.http_trust_env and not settings.http_disable_env_proxy
     async with httpx.AsyncClient(base_url=settings.openai_base_url, timeout=30.0, trust_env=trust) as client:
         r = await client.post(
-            "/responses",
+            "/chat/completions",
             headers={"Authorization": f"Bearer {settings.openai_api_key}"},
             json=body,
         )
@@ -277,14 +277,14 @@ Return schema:
 
     body = {
         "model": settings.openai_model_interpreter,
-        "input": prompt,
+        "messages": [{"role": "user", "content": prompt}],
         "response_format": {"type": "json_object"},
     }
 
     trust = settings.http_trust_env and not settings.http_disable_env_proxy
     async with httpx.AsyncClient(base_url=settings.openai_base_url, timeout=60.0, trust_env=trust) as client:
         r = await client.post(
-            "/responses",
+            "/chat/completions",
             headers={"Authorization": f"Bearer {settings.openai_api_key}"},
             json=body,
         )
@@ -327,14 +327,14 @@ Return schema:
 
     body = {
         "model": settings.openai_model_verifier,
-        "input": prompt,
+        "messages": [{"role": "user", "content": prompt}],
         "response_format": {"type": "json_object"},
     }
 
     trust = settings.http_trust_env and not settings.http_disable_env_proxy
     async with httpx.AsyncClient(base_url=settings.openai_base_url, timeout=60.0, trust_env=trust) as client:
         r = await client.post(
-            "/responses",
+            "/chat/completions",
             headers={"Authorization": f"Bearer {settings.openai_api_key}"},
             json=body,
         )
@@ -345,13 +345,8 @@ Return schema:
 
 
 def _extract_response_text(data: dict[str, Any]) -> str:
-    # Responses API: output[...].content[...].text
-    out = data.get("output") or []
-    for item in out:
-        content = item.get("content") or []
-        for c in content:
-            if c.get("type") in ("output_text", "text") and "text" in c:
-                return c["text"]
-    # fallback
-    return json.dumps({})
+    try:
+        return data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return json.dumps({})
 
