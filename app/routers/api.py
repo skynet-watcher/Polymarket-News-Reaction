@@ -14,7 +14,7 @@ from app.db import SessionLocal, get_session
 from app.job_status import build_system_status, run_tracked_job
 from app.settings import settings
 from app.util import now_utc
-from app.jobs import backtest_news_reactions, btc_signal_test, compute_lag, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
+from app.jobs import backtest_news_reactions, btc_signal_test, bulk_smoke_test, compute_lag, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
 from app.live_feeds import ensure_live_news_sources
 from sqlalchemy import desc, select
 
@@ -156,6 +156,29 @@ async def export_summary(session: AsyncSession = Depends(get_session)) -> dict[s
         "dashboard": snap,
         "system_status": rows,
     }
+
+
+@router.post("/jobs/bulk_smoke_test", response_model=None)
+async def job_bulk_smoke_test(
+    request: Request,
+    count: int = Query(20, ge=1, le=50, description="Number of trades to place (max 50)"),
+) -> Union[JSONResponse, RedirectResponse]:
+    """
+    Place N paper trades across N different markets, targeting soonest-closing
+    markets first so settlements appear as quickly as possible.
+    """
+    out = await bulk_smoke_test.run(count=count)
+    if _wants_json(request):
+        return JSONResponse(out)
+    if not out.get("ok"):
+        reason = out.get("reason", "error")
+        return RedirectResponse(url=f"/health?smoke=error&smoke_detail={reason}", status_code=303)
+    n = out.get("trades_created", 0)
+    next_s = out.get("next_expected_settlement") or "unknown"
+    return RedirectResponse(
+        url=f"/health?smoke=bulk_done&smoke_detail={n}+trades+placed.+Earliest+settlement:+{next_s[:10]}",
+        status_code=303,
+    )
 
 
 @router.post("/jobs/btc_signal_test", response_model=None)

@@ -22,6 +22,15 @@
         <div class="text-xs text-emerald-500 mt-0.5">Check the Paper Trades page to see it. Gate 3 will turn green on the next refresh.</div>
       </div>
     </div>
+  {% elif smoke == "bulk_done" %}
+    <div class="rounded border border-emerald-600 bg-emerald-900 px-5 py-3 mb-6 flex items-center gap-3">
+      <span class="text-xl">✅</span>
+      <div>
+        <div class="font-semibold text-emerald-300 text-sm">Bulk trades placed!</div>
+        <div class="text-xs text-emerald-400 mt-0.5">{{ smoke_detail }}</div>
+        <div class="text-xs text-emerald-500 mt-0.5">Check Paper Trades to see them. P&L will appear as each market closes or after 24 hours.</div>
+      </div>
+    </div>
   {% elif smoke == "first_run" %}
     <div class="rounded border border-indigo-600 bg-indigo-900 px-5 py-3 mb-6 flex items-center gap-3">
       <span class="text-xl">📌</span>
@@ -194,16 +203,16 @@
       </div>
     </div>
     <div class="flex flex-col gap-2 shrink-0">
-      <form method="post" action="/api/jobs/btc_signal_test">
+      <form method="post" action="/api/jobs/bulk_smoke_test?count=20">
         <button type="submit"
-          class="block w-full text-center text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white rounded px-4 py-2 transition">
-          Check BTC price signal
+          class="block w-full text-center text-xs font-semibold bg-emerald-700 hover:bg-emerald-600 text-white rounded px-4 py-2 transition">
+          🚀 Place 20 test trades now
         </button>
       </form>
       <form method="post" action="/api/jobs/btc_signal_test?force=true">
         <button type="submit"
-          class="block w-full text-center text-xs font-semibold bg-emerald-700 hover:bg-emerald-600 text-white rounded px-4 py-2 transition">
-          Force a test trade now
+          class="block w-full text-center text-xs font-semibold bg-indigo-700 hover:bg-indigo-600 text-white rounded px-4 py-2 transition">
+          Place 1 test trade (BTC signal)
         </button>
       </form>
     </div>
