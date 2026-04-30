@@ -79,7 +79,7 @@ Everything runs locally against SQLite, or remotely on Vercel + Postgres.
 - `app/routers/crons.py` — GET endpoints for Vercel cron and cron-job.org: `/cron/pipeline`, `/cron/settle`, `/cron/sync`, `/cron/poll`
 - `app/routers/api.py` — SSE dashboard stream returns 503 immediately on Vercel
 - `requirements.txt` — added `asyncpg==0.30.0`
-- `.python-version` — pins Python 3.11 for Vercel runtime
+- `.python-version` — pins Python 3.12 for Vercel runtime
 - `app/static/.gitkeep` — ensures static directory exists in repo
 - `.env.vercel.example` — env var reference for Vercel dashboard setup
 
