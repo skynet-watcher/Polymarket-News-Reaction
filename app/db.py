@@ -37,7 +37,7 @@ def _resolve_database_url() -> tuple[str, bool]:
     # Only strip sslmode from Postgres URLs.  urlunsplit cannot round-trip
     # SQLite URLs because it drops one of the three leading slashes
     # (sqlite+aiosqlite:///./data.db → sqlite+aiosqlite:/./data.db).
-    if "sqlite" in url:
+    if url.startswith("sqlite"):
         return url, False
 
     parts = urlsplit(url)
@@ -61,7 +61,7 @@ _DATABASE_URL, _POSTGRES_SSL = _resolve_database_url()
 
 def _engine_kwargs() -> dict:
     kw: dict = {"echo": False}
-    if "sqlite" in _DATABASE_URL:
+    if _DATABASE_URL.startswith("sqlite"):
         # SQLite: longer busy wait + WAL reduces "database is locked" when the
         # snapshot loop and manual "Sync markets" run at the same time.
         kw["connect_args"] = {"timeout": 60.0}
@@ -80,7 +80,7 @@ def _engine_kwargs() -> dict:
 
 engine: AsyncEngine = create_async_engine(_DATABASE_URL, **_engine_kwargs())
 
-if "sqlite" in _DATABASE_URL:  # SQLite-only pragma hook — skipped on Postgres
+if _DATABASE_URL.startswith("sqlite"):  # SQLite-only pragma hook — skipped on Postgres
 
     @event.listens_for(engine.sync_engine, "connect")
     def _sqlite_pragma(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]

@@ -14,7 +14,7 @@ The pipeline:
 2. **Poll news** — fetches RSS feeds from whitelisted sources
 3. **Process candidates** — two-stage matching: keyword pre-filter, then GPT-4o-mini relevance screen + interpret + verify
 4. **Paper trade** — places a simulated $10 trade when confidence gates pass
-5. **Settle** — marks trades as WIN/LOSS once the market resolves or after 24 hours (mark-to-market)
+5. **Settle** — settles resolved markets at 0/1 when `Market.winning_outcome` is known, otherwise marks stale open trades to market after 24 hours
 6. **Analyse** — lag analysis, signal accuracy, backtest replay, and the Crypto Preflight Scanner
 
 Everything runs locally against SQLite, or remotely on Vercel + Postgres.
@@ -89,7 +89,7 @@ Everything runs locally against SQLite, or remotely on Vercel + Postgres.
 3. Settings → Environment Variables: add `OPENAI_API_KEY`, `CRON_SECRET` (any random string), `DASHBOARD_SSE_ENABLED=false`
 4. Redeploy
 
-**Hobby plan limits:** function timeout is 10 seconds; cron jobs run at most once per day. Manual buttons still work for on-demand runs. For more frequent automated runs, use [cron-job.org](https://cron-job.org) (free) pointing at `/api/cron/poll` with header `Authorization: Bearer <CRON_SECRET>`.
+**Hobby plan limits:** function timeout defaults to 10 seconds and can be configured up to 60 seconds; Vercel cron jobs run at most once per day on Hobby. Manual buttons still work for on-demand runs. For more frequent automated runs, use [cron-job.org](https://cron-job.org) (free) pointing at `/api/cron/poll` with header `Authorization: Bearer <CRON_SECRET>`.
 
 ---
 
@@ -258,7 +258,7 @@ All jobs are idempotent and callable via the buttons in the UI or directly:
 | `POST /api/lag-measurements/backfill` | Backfill lag measurements (runs in background) |
 | `GET /api/export/summary` | JSON snapshot of counts + system status |
 
-Browser buttons send no `Authorization` header and work without any secret. The cron endpoints (`GET /api/cron/*`) require `Authorization: Bearer $CRON_SECRET` when `CRON_SECRET` is set.
+Browser buttons send no `Authorization` header and work without any secret. That means the `POST /api/jobs/*` endpoints are intentionally browser-callable; do not put an unprotected production deployment at a guessable public URL unless you are comfortable with outsiders triggering paper jobs and OpenAI spend. The cron endpoints (`GET /api/cron/*`) require `Authorization: Bearer $CRON_SECRET` when `CRON_SECRET` is set.
 
 ### Cron endpoints (Vercel / cron-job.org)
 
@@ -287,7 +287,7 @@ See [`.env.vercel.example`](.env.vercel.example) for the full environment variab
 
 **For more frequent runs:** use [cron-job.org](https://cron-job.org) (free) with a custom `Authorization: Bearer <CRON_SECRET>` header pointing at `/api/cron/poll` every 15–30 minutes.
 
-**10-second timeout:** Vercel Hobby functions time out at 10s. Short jobs (sync, settle, poll) fit. `process_candidates` with LLM calls may timeout under heavy load — use the Hobby plan for read-heavy dashboarding and trigger heavy jobs manually or via an external cron service.
+**Function timeout:** Vercel Hobby functions default to 10s and can be configured up to 60s. Short jobs (sync, settle, poll) should fit. `process_candidates` with LLM calls may timeout under heavy load — use the Hobby plan for read-heavy dashboarding and trigger heavy jobs manually or via an external cron service.
 
 ---
 
