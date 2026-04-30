@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -10,6 +11,27 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _configured_database_url() -> str:
+    """
+    Resolve DB URL across local and Vercel naming conventions.
+
+    Local/dev uses DATABASE_URL via Settings. Vercel Postgres commonly injects
+    POSTGRES_URL_* variables when a database is connected to the project, and
+    may not provide DATABASE_URL unless the operator adds it manually.
+    """
+    configured = (settings.database_url or "").strip()
+    if configured and configured != "sqlite+aiosqlite:///./data.db":
+        return configured
+
+    if os.environ.get("VERCEL"):
+        for key in ("POSTGRES_URL_NON_POOLING", "POSTGRES_URL", "POSTGRES_PRISMA_URL"):
+            value = (os.environ.get(key) or "").strip()
+            if value:
+                return value
+
+    return configured or "sqlite+aiosqlite:///./data.db"
 
 
 def _resolve_database_url() -> tuple[str, bool]:
@@ -26,7 +48,7 @@ def _resolve_database_url() -> tuple[str, bool]:
        connect_args. Regex stripping can corrupt URLs when sslmode is the first
        of several query params.
     """
-    url = settings.database_url
+    url = _configured_database_url()
 
     # Step 1: fix driver prefix
     if url.startswith("postgres://"):

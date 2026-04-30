@@ -43,7 +43,7 @@ Everything runs locally against SQLite, or remotely on Vercel + Postgres.
 **Context:** Full pre-deploy review against commit `e10dd57` found several serverless/Postgres edges that could break on Vercel or under concurrent cron/manual runs.
 
 **Vercel/Postgres startup fixes:**
-- `app/db.py` now parses `DATABASE_URL` with `urllib.parse` instead of regex so URLs like `...?sslmode=require&connect_timeout=10` keep all non-SSL query params intact.
+- `app/db.py` now parses DB URLs with `urllib.parse` instead of regex so URLs like `...?sslmode=require&connect_timeout=10` keep all non-SSL query params intact. It accepts explicit `DATABASE_URL` and Vercel Postgres' `POSTGRES_URL_NON_POOLING` / `POSTGRES_URL` names.
 - `app/init_db.py` takes a Postgres advisory transaction lock before `Base.metadata.create_all()` so multiple cold starts do not race table/index creation on a fresh DB.
 - `PriceSnapshot` now has a composite index on `(market_id, timestamp)`, matching the common "latest/nearest snapshot for market" queries used by settlement, lag, metrics, and UI.
 
@@ -85,7 +85,7 @@ Everything runs locally against SQLite, or remotely on Vercel + Postgres.
 
 **Deploy steps:**
 1. [vercel.com](https://vercel.com) → New Project → import `skynet-watcher/Polymarket-News-Reaction`
-2. Storage → Create Database → Postgres → Connect to Project (auto-adds `DATABASE_URL`)
+2. Storage → Create Database → Postgres → Connect to Project (adds Vercel Postgres env vars such as `POSTGRES_URL_NON_POOLING` / `POSTGRES_URL`; `DATABASE_URL` also works if added manually)
 3. Settings → Environment Variables: add `OPENAI_API_KEY`, `CRON_SECRET` (any random string), `DASHBOARD_SSE_ENABLED=false`
 4. Redeploy
 
@@ -205,7 +205,7 @@ Caps RSS poll (≤120s), candidate processing (≤60s), snapshot interval (≤60
 
 | Variable | Meaning |
 |----------|---------|
-| `DATABASE_URL` | Default `sqlite+aiosqlite:///./data.db`. Set to Vercel Postgres URL in production. |
+| `DATABASE_URL` | Optional explicit DB URL. Defaults to SQLite locally. On Vercel, the app also accepts `POSTGRES_URL_NON_POOLING`, `POSTGRES_URL`, or `POSTGRES_PRISMA_URL` from the Postgres integration. |
 | `OPENAI_API_KEY` | Required for interpret/verify; without it candidates stall at LLM steps. |
 | `CRON_SECRET` | Bearer token protecting `/api/cron/*` and settings mutation endpoints. Required on Vercel; optional locally. |
 | `DASHBOARD_SSE_ENABLED` | Set `false` on Vercel (serverless can't hold open connections). |
@@ -280,6 +280,8 @@ See [`.env.vercel.example`](.env.vercel.example) for the full environment variab
 2. Storage → Create Database → Postgres → Connect to Project
 3. Settings → Environment Variables: add `OPENAI_API_KEY`, `CRON_SECRET`, `DASHBOARD_SSE_ENABLED=false`
 4. Redeploy
+
+If `/healthz` returns a 500 immediately after deploy, check the Function logs for a DB URL error and verify the project has either `DATABASE_URL` or Vercel's `POSTGRES_URL_NON_POOLING` / `POSTGRES_URL` env vars in the same environment you deployed.
 
 **Verify Vercel is running the right code:** open `/healthz` on the deployed URL. The response is intentionally self-identifying:
 
