@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import os
 from typing import Optional, Union
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
@@ -33,7 +34,9 @@ async def get_system_status(session: AsyncSession = Depends(get_session)) -> lis
 @router.get("/stream/dashboard", response_model=None)
 async def dashboard_event_stream() -> Union[StreamingResponse, JSONResponse]:
     """Server-sent events: periodic dashboard JSON for live UI updates (paper MVP)."""
-    if not settings.dashboard_sse_enabled:
+    # Vercel serverless functions time out at 10s — an infinite stream makes no
+    # sense there. Return 503 so the browser stops retrying immediately.
+    if not settings.dashboard_sse_enabled or os.environ.get("VERCEL"):
         return JSONResponse({"ok": False, "error": "sse_disabled"}, status_code=503)
 
     async def events():

@@ -11,24 +11,40 @@ from app.settings import settings
 logger = logging.getLogger(__name__)
 
 
-def _resolve_database_url() -> str:
-    """
-    Normalise the database URL so it works with the correct async driver.
+import re as _re
 
-    Vercel Postgres (and most hosted Postgres services) give a URL that starts
-    with  postgres://  or  postgresql://  — neither includes the asyncpg driver
-    prefix that SQLAlchemy needs.  We rewrite it here so callers never have to
-    think about this.
+
+def _resolve_database_url() -> tuple[str, bool]:
+    """
+    Normalise the database URL for the correct async driver.
+
+    Returns (url, needs_ssl) where needs_ssl=True means the original URL
+    contained sslmode=require (Vercel Postgres always does).
+
+    Problems solved:
+    1. Vercel Postgres gives  postgres://  — SQLAlchemy asyncpg needs
+       postgresql+asyncpg://
+    2. asyncpg does NOT accept the libpq  ?sslmode=require  query param —
+       it uses a Python ssl object passed via connect_args.  We strip
+       sslmode from the URL and pass ssl='require' in connect_args instead.
     """
     url = settings.database_url
+
+    # Step 1: fix driver prefix
     if url.startswith("postgres://"):
         url = "postgresql+asyncpg://" + url[len("postgres://"):]
     elif url.startswith("postgresql://") and "+asyncpg" not in url:
         url = "postgresql+asyncpg://" + url[len("postgresql://"):]
-    return url
+
+    # Step 2: strip sslmode (asyncpg rejects it), record whether SSL is needed
+    needs_ssl = bool(_re.search(r"[?&]sslmode=require", url, _re.I))
+    url = _re.sub(r"[?&]sslmode=[^&]*", "", url)
+    url = url.rstrip("?&")
+
+    return url, needs_ssl
 
 
-_DATABASE_URL = _resolve_database_url()
+_DATABASE_URL, _POSTGRES_SSL = _resolve_database_url()
 
 
 def _engine_kwargs() -> dict:
@@ -38,17 +54,21 @@ def _engine_kwargs() -> dict:
         # snapshot loop and manual "Sync markets" run at the same time.
         kw["connect_args"] = {"timeout": 60.0}
     else:
-        # Postgres / asyncpg: connection pool sizing for serverless — a single
-        # connection per cold start is enough; avoids exhausting Vercel Postgres
-        # connection limits under concurrent function invocations.
+        # Postgres / asyncpg: single connection per Lambda invocation avoids
+        # exhausting Vercel Postgres connection limits.  pool_pre_ping detects
+        # stale connections on reuse (important after Lambda warm-start gaps).
         kw["pool_size"] = 1
         kw["max_overflow"] = 0
+        kw["pool_pre_ping"] = True
+        if _POSTGRES_SSL:
+            # Pass ssl as a connect_arg — asyncpg understands this, not sslmode
+            kw["connect_args"] = {"ssl": "require"}
     return kw
 
 
 engine: AsyncEngine = create_async_engine(_DATABASE_URL, **_engine_kwargs())
 
-if "sqlite" in _DATABASE_URL:
+if "sqlite" in _DATABASE_URL:  # SQLite-only pragma hook — skipped on Postgres
 
     @event.listens_for(engine.sync_engine, "connect")
     def _sqlite_pragma(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]
