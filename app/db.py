@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
@@ -11,22 +12,19 @@ from app.settings import settings
 logger = logging.getLogger(__name__)
 
 
-import re as _re
-
-
 def _resolve_database_url() -> tuple[str, bool]:
     """
     Normalise the database URL for the correct async driver.
 
-    Returns (url, needs_ssl) where needs_ssl=True means the original URL
-    contained sslmode=require (Vercel Postgres always does).
+    Returns (url, needs_ssl) where needs_ssl=True means the original URL asked
+    for SSL via sslmode=require/verify-ca/verify-full.
 
     Problems solved:
     1. Vercel Postgres gives  postgres://  — SQLAlchemy asyncpg needs
        postgresql+asyncpg://
-    2. asyncpg does NOT accept the libpq  ?sslmode=require  query param —
-       it uses a Python ssl object passed via connect_args.  We strip
-       sslmode from the URL and pass ssl='require' in connect_args instead.
+    2. Keep non-sslmode query params intact while moving sslmode into
+       connect_args. Regex stripping can corrupt URLs when sslmode is the first
+       of several query params.
     """
     url = settings.database_url
 
@@ -36,10 +34,18 @@ def _resolve_database_url() -> tuple[str, bool]:
     elif url.startswith("postgresql://") and "+asyncpg" not in url:
         url = "postgresql+asyncpg://" + url[len("postgresql://"):]
 
-    # Step 2: strip sslmode (asyncpg rejects it), record whether SSL is needed
-    needs_ssl = bool(_re.search(r"[?&]sslmode=require", url, _re.I))
-    url = _re.sub(r"[?&]sslmode=[^&]*", "", url)
-    url = url.rstrip("?&")
+    parts = urlsplit(url)
+    query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+    kept_pairs: list[tuple[str, str]] = []
+    sslmode = ""
+    for key, value in query_pairs:
+        if key.lower() == "sslmode":
+            sslmode = value.lower()
+        else:
+            kept_pairs.append((key, value))
+
+    needs_ssl = sslmode in {"require", "verify-ca", "verify-full"}
+    url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept_pairs), parts.fragment))
 
     return url, needs_ssl
 
@@ -95,4 +101,3 @@ async def get_session() -> AsyncIterator[AsyncSession]:
             await session.close()
         except Exception:
             logger.debug("AsyncSession.close skipped error (often client disconnect)", exc_info=True)
-

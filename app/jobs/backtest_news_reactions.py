@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 from pathlib import Path
 from statistics import median
 from typing import Any, Dict, Optional, Tuple
@@ -116,8 +117,10 @@ async def _lag_crossing_seconds(session: AsyncSession, *, lag_id: str, label: st
 
 class _AuditWriter:
     def __init__(self, run_id: str) -> None:
-        self.path = Path("logs") / "backtests" / f"backtest_{run_id}.jsonl"
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path: Optional[Path] = None
+        if not os.environ.get("VERCEL"):
+            self.path = Path("logs") / "backtests" / f"backtest_{run_id}.jsonl"
+            self.path.parent.mkdir(parents=True, exist_ok=True)
 
     async def emit(
         self,
@@ -146,8 +149,9 @@ class _AuditWriter:
             "payload": payload,
             "created_at": ts.isoformat(),
         }
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(line, sort_keys=True, default=str) + "\n")
+        if self.path is not None:
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(line, sort_keys=True, default=str) + "\n")
 
 
 def _simulate_backtest_trade(

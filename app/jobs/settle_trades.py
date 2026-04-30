@@ -51,6 +51,8 @@ async def run(session: AsyncSession) -> dict[str, Any]:
                 or_(Market.winning_outcome.is_not(None), NewsArticle.published_at <= cutoff),
             )
         )
+        .order_by(PaperTrade.created_at.asc())
+        .limit(500)
     )
     trades = result.scalars().all()
 
@@ -85,6 +87,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             settled += 1
             continue
 
+        max_skew = settings.settle_t24_snapshot_max_skew_seconds
         snap = (
             await session.execute(
                 select(PriceSnapshot)
@@ -96,6 +99,21 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         ).scalar_one_or_none()
 
         if snap is None or snap.mid_yes is None:
+            # If no pre-cutoff T+24 snapshot exists, allow the first snapshot
+            # shortly after the target. This prevents otherwise-valid trades
+            # from staying OPEN forever after a sparse sync window.
+            snap = (
+                await session.execute(
+                    select(PriceSnapshot)
+                    .where(PriceSnapshot.market_id == trade.market_id)
+                    .where(PriceSnapshot.timestamp > settle_time)
+                    .where(PriceSnapshot.timestamp <= settle_time + dt.timedelta(seconds=max_skew))
+                    .order_by(PriceSnapshot.timestamp.asc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+
+        if snap is None or snap.mid_yes is None:
             skipped += 1
             continue
 
@@ -105,8 +123,8 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         if st <= signal_time:
             skipped += 1
             continue
-        skew = (settle_time - st).total_seconds()
-        if skew < 0 or skew > settings.settle_t24_snapshot_max_skew_seconds:
+        skew = abs((settle_time - st).total_seconds())
+        if skew > max_skew:
             skipped += 1
             continue
 

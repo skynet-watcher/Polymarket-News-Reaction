@@ -32,6 +32,7 @@ from app.models import (
     ThresholdProfile,
 )
 from app.paper_economics import aggregate_portfolio, live_net_mark_usd
+from app.security import validate_public_https_url, verify_bearer_secret
 from app.settings import settings as app_settings
 from app.threshold_context import RUNTIME_KEY_THRESHOLD_PROFILE, resolve_trading_thresholds
 from app.threshold_profiles_seed import ensure_default_threshold_profiles
@@ -371,12 +372,12 @@ async def settings(request: Request, session: AsyncSession = Depends(get_session
     )
 
 
-@router.post("/settings/sources/add")
+@router.post("/settings/sources/add", dependencies=[Depends(verify_bearer_secret)])
 async def add_source(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
     form = await request.form()
     name = (form.get("name") or "").strip()
     domain = (form.get("domain") or "").strip().lower().removeprefix("www.")
-    rss_url = (form.get("rss_url") or "").strip()
+    rss_url = validate_public_https_url((form.get("rss_url") or "").strip())
     source_tier = (form.get("source_tier") or "SOFT").strip()
     polling_interval_minutes = int(form.get("polling_interval_minutes") or 5)
     active = (form.get("active") or "on") == "on"
@@ -397,7 +398,7 @@ async def add_source(request: Request, session: AsyncSession = Depends(get_sessi
     return RedirectResponse(url="/settings", status_code=303)
 
 
-@router.post("/settings/runtime/threshold-profile")
+@router.post("/settings/runtime/threshold-profile", dependencies=[Depends(verify_bearer_secret)])
 async def save_threshold_profile(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
     form = await request.form()
     pid = (form.get("threshold_profile_id") or "").strip()
@@ -413,7 +414,7 @@ async def save_threshold_profile(request: Request, session: AsyncSession = Depen
     return RedirectResponse(url="/settings", status_code=303)
 
 
-@router.post("/settings/runtime/lag-focus")
+@router.post("/settings/runtime/lag-focus", dependencies=[Depends(verify_bearer_secret)])
 async def save_lag_focus(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
     form = await request.form()
     raw = (form.get("lag_focus_top_n") or "0").strip()
@@ -430,7 +431,7 @@ async def save_lag_focus(request: Request, session: AsyncSession = Depends(get_s
     return RedirectResponse(url="/settings", status_code=303)
 
 
-@router.post("/settings/resolution-mappings/add")
+@router.post("/settings/resolution-mappings/add", dependencies=[Depends(verify_bearer_secret)])
 async def add_resolution_mapping(request: Request, session: AsyncSession = Depends(get_session)) -> RedirectResponse:
     form = await request.form()
     market_id = (form.get("market_id") or "").strip() or None

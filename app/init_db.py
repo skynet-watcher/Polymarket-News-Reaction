@@ -8,6 +8,11 @@ from app.models import Base
 
 async def init_db(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
+        if engine.dialect.name != "sqlite":
+            # Serialize create_all on serverless cold starts. SQLAlchemy's
+            # existence checks are not atomic when multiple fresh Lambda
+            # invocations initialize the same empty Postgres DB.
+            await conn.execute(text("SELECT pg_advisory_xact_lock(912337001)"))
         await conn.run_sync(Base.metadata.create_all)
 
         # All migrations below are SQLite-only (they use PRAGMA which Postgres

@@ -4,7 +4,7 @@ import datetime as dt
 from typing import Any
 from typing import Optional, List, Dict
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -278,6 +278,7 @@ class PaperTrade(Base):
 
 class PriceSnapshot(Base):
     __tablename__ = "price_snapshots"
+    __table_args__ = (Index("ix_price_snapshots_market_timestamp", "market_id", "timestamp"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     market_id: Mapped[str] = mapped_column(ForeignKey("markets.id"), index=True)

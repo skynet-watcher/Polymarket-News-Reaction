@@ -345,6 +345,7 @@ Update **Chad — completed** at the bottom with date + one line per item. Push 
 - **2026-04-28 —** Phase 1 news reaction backtester: `BacktestRun`, `BacktestCase`, `BacktestEventLog`, `POST /api/jobs/backtest_news_reactions`, `/analysis/backtests`, JSONL audit logs. 52 tests pass.
 - **2026-04-28 —** No-paper-trades diagnosis: real markets still had JSON `null` token IDs; `sync_markets` now reads Gamma `clobTokenIds`, existing SQLite DBs backfill backtest trade columns, `/trades` badges BACKTEST rows, and `/analysis/backtests` supports run/action filtering.
 - **2026-04-28 —** Alex review sprint start: added `ALEX_REVIEW.md`, documented the fixture-only data baseline, added Research threshold profile, LLM relevance-call cap/cost telemetry, process-candidate funnel counters, dashboard LLM cost, and `/signals` rejection reasons.
+- **2026-04-30 —** Vercel hardening pass: fixed Postgres URL parsing and cold-start `create_all()` races, added snapshot timestamp index, protected cron/job/settings POST endpoints with `CRON_SECRET`, hardened RSS URL/XML handling, made settlement tolerate sparse T+24h snapshots, made crypto preflight pagination/upserts concurrency-safe, and disabled backtest JSONL writes on Vercel.
 
 ---
 

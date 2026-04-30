@@ -5,13 +5,13 @@ import logging
 import time
 from typing import Any
 
-import httpx
 from lxml import etree
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.http_client import get_with_retry, polymarket_async_client
 from app.models import NewsArticle, NewsSource
+from app.security import validate_public_https_url
 from app.util import hostname_from_url, hostname_matches_source, now_utc, sha256_hex, stable_article_id
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,8 @@ def _atom_entry_link(entry: Any) -> str:
 def _parse_rss(xml_bytes: bytes) -> list[dict[str, Any]]:
     # Minimal RSS/Atom parsing for MVP (lxml is available).
     items: list[dict[str, Any]] = []
-    root = etree.fromstring(xml_bytes)
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, recover=True, huge_tree=False)
+    root = etree.fromstring(xml_bytes, parser=parser)
 
     # RSS 2.0: channel/item
     for item in root.xpath("//channel/item"):
@@ -132,10 +133,11 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         for src in sources:
             xml = _EMPTY_RSS_BYTES
             try:
-                r = await get_with_retry(client, src.rss_url)
+                rss_url = validate_public_https_url(src.rss_url)
+                r = await get_with_retry(client, rss_url)
                 if r.status_code < 400 and r.content:
                     xml = r.content
-            except httpx.RequestError:
+            except Exception:
                 pass
 
             items = _parse_rss_safe(xml)
@@ -189,4 +191,3 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         duration_ms = int((time.perf_counter() - t0) * 1000)
         logger.info("poll_news done sources=%s inserted=%s duration_ms=%s", len(sources), inserted, duration_ms)
         return {"sources": len(sources), "inserted": inserted, "duration_ms": duration_ms}
-

@@ -18,7 +18,9 @@ import re
 from typing import Any, Optional
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionLocal
@@ -173,14 +175,20 @@ def _parse_intraperiod(
     else:
         notes.append("interval not detected")
 
-    # Candle close time = end_date (Polymarket end_date IS the candle close time)
-    # Candle start time = end_date - interval
+    # Candle close time is usually end_date for Polymarket candle markets, but
+    # keep low-confidence parses out of automation when it is not aligned to the
+    # Binance interval boundary. Some markets use trading cutoffs or delayed
+    # resolution timestamps rather than the exact exchange candle close.
     candle_close: Optional[dt.datetime] = end_date
     candle_start: Optional[dt.datetime] = None
 
     if candle_close and interval_secs:
         candle_start = candle_close - dt.timedelta(seconds=interval_secs)
         confidence += 0.25
+        close_ts = int(candle_close.timestamp())
+        if close_ts % interval_secs != 0:
+            confidence -= 0.20
+            notes.append("end_date is not aligned to Binance interval boundary; candle time needs review")
     else:
         notes.append("candle start time could not be computed — end_date or interval missing")
 
@@ -263,7 +271,8 @@ async def _fetch_crypto_candidates(
 
     async with polymarket_async_client() as client:
         offset = 0
-        while len(candidates) < max_markets:
+        pages = 0
+        while len(candidates) < max_markets and pages < max_markets // page_size:
             try:
                 params = {**base_params, "offset": offset}
                 r = await client.get(f"{_GAMMA_BASE}/markets", params=params)
@@ -273,11 +282,16 @@ async def _fetch_crypto_candidates(
                 page = _extract_markets(r.json())
                 if not page:
                     break  # no more results
+                before = len(seen_ids)
                 for m in page:
                     mid = str(m.get("id") or "").strip()
                     if mid and mid not in seen_ids:
                         seen_ids.add(mid)
                         candidates.append(m)
+                pages += 1
+                if len(seen_ids) == before:
+                    logger.warning("crypto_preflight: Gamma page at offset %d contained no new markets", offset)
+                    break
                 if len(page) < page_size:
                     break  # last page
                 offset += page_size
@@ -285,7 +299,7 @@ async def _fetch_crypto_candidates(
                 logger.exception("crypto_preflight: Gamma fetch failed at offset %d", offset)
                 break
 
-    logger.info("crypto_preflight: fetched %d total markets from Gamma (%d pages)", len(candidates), offset // page_size + 1)
+    logger.info("crypto_preflight: fetched %d total markets from Gamma (%d pages)", len(candidates), pages)
     return candidates
 
 
@@ -465,10 +479,6 @@ async def run(
     }
 
     async with SessionLocal() as session:
-        # Wipe all previous results so stale markets don't persist across scans.
-        await session.execute(delete(CryptoMarketProfile))
-        await session.flush()
-
         for raw in filtered:
             try:
                 profile_data = await _process_one(raw, now, min_liquidity)
@@ -633,14 +643,30 @@ async def _process_one(raw: dict[str, Any], now: dt.datetime, min_liquidity: Opt
 
 async def _upsert_profile(session: AsyncSession, data: dict[str, Any], now: dt.datetime) -> None:
     """Insert or update a CryptoMarketProfile row."""
-    market_id = data["market_id"]
-    existing = (
-        await session.execute(
-            select(CryptoMarketProfile).where(CryptoMarketProfile.market_id == market_id)
-        )
-    ).scalar_one_or_none()
+    dialect_name = session.get_bind().dialect.name
+    values = {"id": new_id("cmp"), **data, "updated_at": now}
+    set_values = {k: v for k, v in values.items() if k not in {"id", "market_id", "created_at"}}
 
-    if existing is not None:
+    if dialect_name == "postgresql":
+        stmt = pg_insert(CryptoMarketProfile).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[CryptoMarketProfile.market_id],
+            set_=set_values,
+        )
+        await session.execute(stmt)
+        return
+
+    if dialect_name == "sqlite":
+        stmt = sqlite_insert(CryptoMarketProfile).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[CryptoMarketProfile.market_id],
+            set_=set_values,
+        )
+        await session.execute(stmt)
+        return
+
+    existing = (await session.execute(select(CryptoMarketProfile).where(CryptoMarketProfile.market_id == data["market_id"]))).scalar_one_or_none()
+    if existing:
         for k, v in data.items():
             if k != "market_id" and hasattr(existing, k):
                 setattr(existing, k, v)

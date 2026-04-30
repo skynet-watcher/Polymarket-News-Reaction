@@ -11,6 +11,40 @@ Sprint tasks for Chad: see [`CHAD_SPRINT.md`](CHAD_SPRINT.md) and [`ALEX_REVIEW.
 
 ---
 
+### 2026-04-30 — Chad Vercel hardening pass: DB startup, auth, settlement, RSS, crypto preflight
+
+**Context:** Full pre-deploy review against commit `e10dd57` found several serverless/Postgres edges that could break on Vercel or under concurrent cron/manual runs. Chad fixed the concrete issues in this pass.
+
+**Vercel/Postgres startup fixes:**
+- `app/db.py` now parses `DATABASE_URL` with `urllib.parse` instead of regex so URLs like `...?sslmode=require&connect_timeout=10` keep all non-SSL query params intact.
+- `app/init_db.py` takes a Postgres advisory transaction lock before `Base.metadata.create_all()` so multiple cold starts do not race table/index creation on a fresh DB.
+- `PriceSnapshot` now has a composite index on `(market_id, timestamp)`, matching the common "latest/nearest snapshot for market" queries used by settlement, lag, metrics, and UI.
+
+**Operator security model:**
+- New shared helper: `app/security.py`.
+- Cron endpoints and manual mutation endpoints (`POST /api/jobs/*`, `POST /api/lag-measurements/backfill`, and `POST /settings/*`) now use `Authorization: Bearer <CRON_SECRET>` when `CRON_SECRET` is configured.
+- Local dev remains open if `CRON_SECRET` is unset. Vercel should always set it.
+- RSS source URLs added through Settings must be absolute public HTTPS URLs; localhost/private/link-local IP targets are rejected.
+
+**Reliability fixes:**
+- `settle_trades` now batches eligible trades and can settle from the first snapshot shortly after T+24h when the exact pre-cutoff snapshot is missing. This prevents valid paper trades from staying `OPEN` forever after sparse syncs.
+- `cron_pipeline` and `cron_poll` explicitly roll back after a failed step before continuing with the shared request session.
+- `backtest_news_reactions` no longer writes JSONL files on Vercel; DB `BacktestEventLog` rows remain the canonical audit trail. Local runs still mirror to `logs/backtests/*.jsonl`.
+
+**Crypto preflight fixes:**
+- `_fetch_crypto_candidates` now breaks if Gamma pagination repeats a page and caps page count.
+- `_upsert_profile` uses dialect-native `ON CONFLICT DO UPDATE` for SQLite/Postgres instead of select-then-insert.
+- The scanner no longer deletes all `CryptoMarketProfile` rows at the start of each run; this avoids cross-request table wipes.
+- Candle parsing now lowers confidence when `endDate` is not aligned to the inferred Binance interval boundary, because some markets use trading cutoffs or delayed resolution timestamps rather than exact candle close times.
+
+**RSS hardening:**
+- RSS XML parsing uses an `lxml` parser with entity resolution disabled and network access disabled.
+- Feed polling validates stored source URLs before fetching.
+
+**Verification:** `python3 -m compileall app` passes with `PYTHONPYCACHEPREFIX` pointed at `/private/tmp`; `git diff --check` passes. Full pytest was not run in this Codex environment because `pytest` is not installed in either local Python or the bundled runtime.
+
+---
+
 ### 2026-04-28 — Alex review sprint: clean data, Research profile, LLM guard
 
 **Data baseline:** Current local `data.db` has only `smoke_mkt` price snapshots before the CLOB token fix. Treat pre-fix lag/backtest analytics as contaminated fixture data. At the time of Chad's audit: real snapshot count was `0`, tokenized active real markets were `2`, signals were `225` (`224 ABSTAIN`, `1 ACT`), and paper trades were `0`.
@@ -246,6 +280,7 @@ That **caps** RSS poll (≤120s), candidate processing (≤60s), full Gamma snap
 | `POLYMARKET_ENTRY_FEE_RATE` | Taker-style fee on that notional at open (default **0.003** = 0.3%). |
 | `POLYMARKET_WINNING_PROFIT_FEE_RATE` | Fee on **positive** settlement PnL (default **0.02** = 2%). |
 | `DATABASE_URL` | Default `sqlite+aiosqlite:///./data.db` (project dir). |
+| `CRON_SECRET` | Bearer token for Vercel cron and operator-only POST endpoints. Required in Vercel; optional for local dev. |
 | `OPENAI_API_KEY` | Optional but required for interpret/verify; without it, candidates stall at LLM steps. |
 | `REALTIME_PAPER_QUICKSTART` | `1` = faster cadence (see above). |
 | `BACKGROUND_*_INTERVAL_SECONDS` | `0` disables that background loop; see `.env.example`. |
@@ -322,6 +357,19 @@ location /api/stream/dashboard {
 
 All jobs are designed to be **idempotent**.
 
+When `CRON_SECRET` is set, all `POST` job endpoints require:
+
+```bash
+Authorization: Bearer $CRON_SECRET
+```
+
+Vercel cron sends this header automatically for `/api/cron/*`. Manual curl examples must include it in production:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
+  https://your-app.vercel.app/api/jobs/sync_markets
+```
+
 ### Backtesting news reactions
 
 Use **Analysis → Backtests** or `POST /api/jobs/backtest_news_reactions` to measure how quickly markets moved after article publication using only locally stored `price_snapshots`.
@@ -345,6 +393,8 @@ logs/backtests/backtest_<run_id>.jsonl
 ```
 
 The JSONL logs are local runtime artifacts and are ignored by Git.
+
+On Vercel, JSONL mirroring is disabled because function filesystems are not persistent. Use the `backtest_event_logs` table as the canonical audit source in production.
 
 ### Upgrade note: source tiers
 
