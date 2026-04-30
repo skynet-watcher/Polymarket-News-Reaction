@@ -110,11 +110,11 @@ def _engine_kwargs() -> dict:
         # snapshot loop and manual "Sync markets" run at the same time.
         kw["connect_args"] = {"timeout": 60.0}
     else:
-        # Postgres / asyncpg: single connection per Lambda invocation avoids
-        # exhausting Vercel Postgres connection limits.  pool_pre_ping detects
-        # stale connections on reuse (important after Lambda warm-start gaps).
-        kw["pool_size"] = 1
-        kw["max_overflow"] = 0
+        # Postgres / asyncpg: keep the pool tiny for serverless, but allow one
+        # extra connection because process_candidates briefly opens worker
+        # sessions while the request session is still alive.
+        kw["pool_size"] = 2 if os.environ.get("VERCEL") else 5
+        kw["max_overflow"] = 1 if os.environ.get("VERCEL") else 10
         kw["pool_pre_ping"] = True
         connect_args = dict(_POSTGRES_CONNECT_ARGS)
         if os.environ.get("VERCEL") and "timeout" not in connect_args:

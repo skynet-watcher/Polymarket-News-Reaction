@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -36,7 +37,7 @@ async def batch_relevance_screen(
         # No LLM: pass all candidates through so keyword matches still work.
         return [{"market_id": m.id, "score": 1.0, "reason": "no-llm fallback"} for m in markets]
 
-    batch_size = max(1, settings.matcher_llm_batch_size)
+    batch_size = max(1, min(settings.matcher_llm_batch_size, 5) if os.environ.get("VERCEL") else settings.matcher_llm_batch_size)
     results: list[dict[str, Any]] = []
 
     for i in range(0, len(markets), batch_size):
@@ -103,7 +104,8 @@ Return ONLY a JSON array — one object per market, in the same order:
     }
 
     trust = settings.http_trust_env and not settings.http_disable_env_proxy
-    async with httpx.AsyncClient(base_url=settings.openai_base_url, timeout=30.0, trust_env=trust) as client:
+    timeout = 15.0 if os.environ.get("VERCEL") else 30.0
+    async with httpx.AsyncClient(base_url=settings.openai_base_url, timeout=timeout, trust_env=trust) as client:
         r = await client.post(
             "/chat/completions",
             headers={"Authorization": f"Bearer {settings.openai_api_key}"},
@@ -349,4 +351,3 @@ def _extract_response_text(data: dict[str, Any]) -> str:
         return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
         return json.dumps({})
-

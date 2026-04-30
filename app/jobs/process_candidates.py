@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import logging
 import math
+import os
 import time
 from typing import Any, Optional
 
@@ -23,6 +24,10 @@ from app.threshold_context import resolve_trading_thresholds
 from app.util import new_id, now_utc
 
 logger = logging.getLogger(__name__)
+
+
+def _on_vercel() -> bool:
+    return bool(os.environ.get("VERCEL"))
 
 
 async def _lag_focus_top_n(session: AsyncSession) -> int:
@@ -54,7 +59,7 @@ async def _process_one_candidate_signal(signal_id: str, semaphore: asyncio.Semap
                 interpretation, verifier = await interpret_and_verify_with_timeout(
                     market,
                     article,
-                    timeout_seconds=settings.llm_call_timeout_seconds,
+                    timeout_seconds=min(settings.llm_call_timeout_seconds, 20.0) if _on_vercel() else settings.llm_call_timeout_seconds,
                 )
 
                 sig.interpreted_outcome = interpretation.get("interpreted_outcome", "UNKNOWN")
@@ -121,12 +126,13 @@ async def run(session: AsyncSession) -> dict[str, Any]:
     t_run = time.perf_counter()
     tctx = await resolve_trading_thresholds(session)
     cutoff = now_utc() - dt.timedelta(minutes=tctx.max_article_age_minutes)
+    article_limit = 3 if _on_vercel() else 100
     articles = (
         await session.execute(
             select(NewsArticle)
             .where(NewsArticle.published_at >= cutoff)
             .order_by(desc(NewsArticle.published_at))
-            .limit(100)
+            .limit(article_limit)
         )
     ).scalars().all()
     if not articles:
@@ -154,7 +160,10 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         }
 
     focus_n = await _lag_focus_top_n(session)
-    market_limit = settings.matcher_market_limit
+    market_limit = min(settings.matcher_market_limit, 30) if _on_vercel() else settings.matcher_market_limit
+    keyword_max_candidates = min(settings.matcher_keyword_max_candidates, 5) if _on_vercel() else settings.matcher_keyword_max_candidates
+    llm_batch_size = min(settings.matcher_llm_batch_size, 5) if _on_vercel() else settings.matcher_llm_batch_size
+    max_llm_calls = min(settings.max_llm_calls_per_run, 2) if _on_vercel() else settings.max_llm_calls_per_run
     if focus_n > 0:
         top_ids = (
             await session.execute(
@@ -212,7 +221,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             min_relevance=settings.matcher_keyword_min_relevance,
         )
         # Cap before LLM to bound token spend.
-        kw_candidates = kw_candidates[: settings.matcher_keyword_max_candidates]
+        kw_candidates = kw_candidates[:keyword_max_candidates]
         keyword_candidates_total += len(kw_candidates)
 
         if not kw_candidates:
@@ -220,21 +229,21 @@ async def run(session: AsyncSession) -> dict[str, Any]:
 
         # ── Stage 2: batch LLM relevance screen ──────────────────────────────
         candidate_markets = [c["market"] for c in kw_candidates]
-        planned_calls = math.ceil(len(candidate_markets) / max(1, settings.matcher_llm_batch_size))
-        if settings.openai_api_key and settings.max_llm_calls_per_run >= 0:
-            remaining_calls = max(0, settings.max_llm_calls_per_run - llm_calls_used)
+        planned_calls = math.ceil(len(candidate_markets) / max(1, llm_batch_size))
+        if settings.openai_api_key and max_llm_calls >= 0:
+            remaining_calls = max(0, max_llm_calls - llm_calls_used)
             if remaining_calls <= 0:
                 llm_calls_skipped += planned_calls
                 continue
-            allowed_markets = remaining_calls * max(1, settings.matcher_llm_batch_size)
+            allowed_markets = remaining_calls * max(1, llm_batch_size)
             if len(candidate_markets) > allowed_markets:
                 skipped_markets = len(candidate_markets) - allowed_markets
                 candidate_markets = candidate_markets[:allowed_markets]
                 kw_candidates = kw_candidates[:allowed_markets]
-                llm_calls_skipped += math.ceil(skipped_markets / max(1, settings.matcher_llm_batch_size))
+                llm_calls_skipped += math.ceil(skipped_markets / max(1, llm_batch_size))
         llm_screened += len(candidate_markets)
         if settings.openai_api_key:
-            calls_for_article = math.ceil(len(candidate_markets) / max(1, settings.matcher_llm_batch_size))
+            calls_for_article = math.ceil(len(candidate_markets) / max(1, llm_batch_size))
             llm_calls_used += calls_for_article
             estimated_llm_input_tokens += _estimate_relevance_tokens(article, candidate_markets)
         # Build a quick lookup so we can join LLM scores back to keyword scores.
@@ -286,11 +295,17 @@ async def run(session: AsyncSession) -> dict[str, Any]:
     match_phase_ms = int((time.perf_counter() - t_match) * 1000)
 
     candidates = (
-        await session.execute(select(NewsSignal).where(NewsSignal.action == "CANDIDATE").order_by(desc(NewsSignal.created_at)).limit(200))
+        await session.execute(
+            select(NewsSignal)
+            .where(NewsSignal.action == "CANDIDATE")
+            .order_by(desc(NewsSignal.created_at))
+            .limit(2 if _on_vercel() else 200)
+        )
     ).scalars().all()
 
     t_llm = time.perf_counter()
-    sem = asyncio.Semaphore(max(1, settings.llm_max_concurrency))
+    effective_concurrency = 1 if _on_vercel() else settings.llm_max_concurrency
+    sem = asyncio.Semaphore(max(1, effective_concurrency))
     results = await asyncio.gather(*[_process_one_candidate_signal(s.id, sem) for s in candidates])
     llm_phase_ms = int((time.perf_counter() - t_llm) * 1000)
 
@@ -321,7 +336,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         "duration_ms": duration_ms,
         "match_phase_ms": match_phase_ms,
         "llm_phase_ms": llm_phase_ms,
-        "llm_max_concurrency": settings.llm_max_concurrency,
+        "llm_max_concurrency": effective_concurrency,
         "llm_enabled": settings.openai_api_key is not None,
         "lag_focus_top_n": focus_n,
         "threshold_profile_id": tctx.profile_id,

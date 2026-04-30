@@ -318,6 +318,8 @@ Use `git_commit` to compare the deployment to GitHub `main`. The current product
 
 To keep manual market sync usable on Vercel, `sync_markets` uses a thin serverless pass when `VERCEL=1`: one Gamma page per source and at most 10 CLOB orderbook snapshots. Local runs still use the broader pagination limits. This is a deliberate deployment compromise so the Hobby plan can populate live markets without timing out.
 
+`process_candidates` is also capped on Vercel: newest 3 articles, at most 30 markets, at most 2 relevance-screen LLM calls, 2 candidate interpretation passes, single-worker interpretation, and shorter OpenAI timeouts. Local runs keep the broader research settings. This keeps the end-to-end signal path testable on Vercel, but repeated clicks or an external cron are needed to chew through larger backlogs.
+
 ---
 
 ## Backtesting
