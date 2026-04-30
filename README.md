@@ -281,6 +281,21 @@ See [`.env.vercel.example`](.env.vercel.example) for the full environment variab
 3. Settings → Environment Variables: add `OPENAI_API_KEY`, `CRON_SECRET`, `DASHBOARD_SSE_ENABLED=false`
 4. Redeploy
 
+**Verify Vercel is running the right code:** open `/healthz` on the deployed URL. The response is intentionally self-identifying:
+
+```json
+{
+  "ok": "true",
+  "app": "polymarket-news-reaction",
+  "build_marker": "fastapi-main-vercel",
+  "runtime": "vercel",
+  "git_branch": "main",
+  "git_commit": "<VERCEL_GIT_COMMIT_SHA>"
+}
+```
+
+Use `git_commit` to compare the deployment to GitHub `main`. The current production deployment should report `git_branch: "main"` and `runtime: "vercel"`; if it does not, Vercel is pointed at the wrong project/ref or serving an older deployment.
+
 **Hobby plan cron schedule** (2 jobs/day max):
 - 8:00 AM UTC — full pipeline (`/api/cron/pipeline`)
 - 8:00 PM UTC — settlement pass (`/api/cron/settle`)

@@ -172,7 +172,26 @@ async def _startup() -> None:
 
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
-    return {"ok": "true"}
+    is_vercel = bool(os.environ.get("VERCEL"))
+    return {
+        "ok": "true",
+        "app": "polymarket-news-reaction",
+        "build_marker": "fastapi-main-vercel",
+        "runtime": "vercel" if is_vercel else "local",
+        "vercel_env": os.environ.get("VERCEL_ENV", ""),
+        "git_branch": os.environ.get("VERCEL_GIT_COMMIT_REF", "main"),
+        "git_commit": os.environ.get("VERCEL_GIT_COMMIT_SHA", ""),
+        "git_repo": "/".join(
+            part
+            for part in (
+                os.environ.get("VERCEL_GIT_REPO_OWNER", ""),
+                os.environ.get("VERCEL_GIT_REPO_SLUG", ""),
+            )
+            if part
+        ),
+        "deployment_url": os.environ.get("VERCEL_URL", ""),
+        "production_url": os.environ.get("VERCEL_PROJECT_PRODUCTION_URL", ""),
+    }
 
 
 app.include_router(api.router, prefix="/api")
@@ -180,4 +199,3 @@ app.include_router(crons.router, prefix="/api")
 app.include_router(ui.router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
