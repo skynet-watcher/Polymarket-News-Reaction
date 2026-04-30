@@ -281,7 +281,13 @@ See [`.env.vercel.example`](.env.vercel.example) for the full environment variab
 3. Settings → Environment Variables: add `OPENAI_API_KEY`, `CRON_SECRET`, `DASHBOARD_SSE_ENABLED=false`
 4. Redeploy
 
-If `/healthz` returns a 500 immediately after deploy, check the Function logs for a DB URL error and verify the project has either `DATABASE_URL` or Vercel's `POSTGRES_URL_NON_POOLING` / `POSTGRES_URL` env vars in the same environment you deployed.
+If the main dashboard returns a 500 immediately after deploy, open `/healthz` first. `/healthz` is DB-diagnostic and should still return even when startup DB initialization fails. Check:
+- `startup_status`: `ok` means schema creation and seed data completed; `error` means read `startup_error_type` / `startup_error`.
+- `database_scheme`: should be `postgresql+asyncpg` on Vercel, not `sqlite+aiosqlite`.
+- `database_is_postgres`: should be `true` on Vercel.
+- `database_ssl`: should be `true` for managed Postgres URLs with `sslmode=require`.
+
+Verify the project has either `DATABASE_URL` or Vercel/Neon's `POSTGRES_URL_NON_POOLING` / `POSTGRES_URL` env vars in the same environment you deployed.
 
 **Verify Vercel is running the right code:** open `/healthz` on the deployed URL. The response is intentionally self-identifying:
 
@@ -292,7 +298,9 @@ If `/healthz` returns a 500 immediately after deploy, check the Function logs fo
   "build_marker": "fastapi-main-vercel",
   "runtime": "vercel",
   "git_branch": "main",
-  "git_commit": "<VERCEL_GIT_COMMIT_SHA>"
+  "git_commit": "<VERCEL_GIT_COMMIT_SHA>",
+  "startup_status": "ok",
+  "database_scheme": "postgresql+asyncpg"
 }
 ```
 

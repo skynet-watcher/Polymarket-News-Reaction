@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import SessionLocal, engine, get_session
+from app.db import SessionLocal, database_runtime_summary, engine, get_session
 from app.job_status import run_tracked_background_job
 from app.init_db import init_db
 from app.live_feeds import ensure_live_news_sources
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 # Monotonic anchor for full Gamma sync vs CLOB-only refresh (see _snapshot_once).
 _snapshot_last_full: list[float] = [0.0]
 _snapshot_loop_tick: list[int] = [0]
+STARTUP_STATE: dict[str, str] = {"status": "not_started", "error_type": "", "error": ""}
 
 
 async def _snapshot_once(session: AsyncSession) -> dict[str, Any]:
@@ -61,30 +62,49 @@ templates.env.filters["format_lag"] = format_lag_seconds
 
 @app.on_event("startup")
 async def _startup() -> None:
-    await init_db(engine)
-    async for session in get_session():
-        if settings.auto_seed_news_feeds:
-            await ensure_live_news_sources(session)
-        await ensure_default_threshold_profiles(session)
-        prof_row = await session.get(RuntimeSetting, RUNTIME_KEY_THRESHOLD_PROFILE)
-        if prof_row is None:
-            session.add(RuntimeSetting(key=RUNTIME_KEY_THRESHOLD_PROFILE, value=DEFAULT_PROFILE_ID))
-            await session.commit()
-        cnt = (await session.execute(select(func.count()).select_from(NewsSource))).scalar_one()
-        # Demo source only if nothing configured (offline / first run without seed).
-        if cnt == 0:
-            session.add(
-                NewsSource(
-                    name="Demo Wire (fixture)",
-                    domain="demo-wire.example",
-                    rss_url="https://demo-wire.example/rss",
-                    source_tier="SOFT",
-                    polling_interval_minutes=5,
-                    active=True,
+    _on_vercel = bool(os.environ.get("VERCEL"))
+
+    async def _one_time_init() -> None:
+        await init_db(engine)
+        async for session in get_session():
+            if settings.auto_seed_news_feeds:
+                await ensure_live_news_sources(session)
+            await ensure_default_threshold_profiles(session)
+            prof_row = await session.get(RuntimeSetting, RUNTIME_KEY_THRESHOLD_PROFILE)
+            if prof_row is None:
+                session.add(RuntimeSetting(key=RUNTIME_KEY_THRESHOLD_PROFILE, value=DEFAULT_PROFILE_ID))
+                await session.commit()
+            cnt = (await session.execute(select(func.count()).select_from(NewsSource))).scalar_one()
+            # Demo source only if nothing configured (offline / first run without seed).
+            if cnt == 0:
+                session.add(
+                    NewsSource(
+                        name="Demo Wire (fixture)",
+                        domain="demo-wire.example",
+                        rss_url="https://demo-wire.example/rss",
+                        source_tier="SOFT",
+                        polling_interval_minutes=5,
+                        active=True,
+                    )
                 )
-            )
-            await session.commit()
-        break
+                await session.commit()
+            break
+
+    try:
+        STARTUP_STATE.update({"status": "running", "error_type": "", "error": ""})
+        await _one_time_init()
+        STARTUP_STATE.update({"status": "ok", "error_type": "", "error": ""})
+    except Exception as exc:
+        STARTUP_STATE.update(
+            {
+                "status": "error",
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:500],
+            }
+        )
+        logger.exception("startup one-time init failed")
+        if not _on_vercel:
+            raise
 
     async def _snapshot_loop() -> None:
         # Full Gamma sync on `snapshot_interval_seconds`, with faster CLOB-only refresh for
@@ -114,7 +134,6 @@ async def _startup() -> None:
     # On Vercel (serverless) background asyncio tasks are pointless — the process
     # exits after each request.  Scheduling is handled by Vercel Cron + the
     # /api/cron/* endpoints instead.
-    _on_vercel = bool(os.environ.get("VERCEL"))
     if _on_vercel:
         logger.info("startup: running on Vercel — background loops disabled, cron endpoints active")
         return
@@ -191,6 +210,10 @@ async def healthz() -> dict[str, str]:
         ),
         "deployment_url": os.environ.get("VERCEL_URL", ""),
         "production_url": os.environ.get("VERCEL_PROJECT_PRODUCTION_URL", ""),
+        "startup_status": STARTUP_STATE["status"],
+        "startup_error_type": STARTUP_STATE["error_type"],
+        "startup_error": STARTUP_STATE["error"],
+        **database_runtime_summary(),
     }
 
 

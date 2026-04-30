@@ -25,3 +25,5 @@ def test_healthz_identifies_vercel_git_build(monkeypatch) -> None:
     assert out["git_commit"] == "abc123"
     assert out["git_repo"] == "skynet-watcher/Polymarket-News-Reaction"
     assert out["deployment_url"] == "preview.example.vercel.app"
+    assert "startup_status" in out
+    assert "database_scheme" in out

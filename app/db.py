@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import AsyncIterator
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import event
@@ -34,12 +35,12 @@ def _configured_database_url() -> str:
     return configured or "sqlite+aiosqlite:///./data.db"
 
 
-def _resolve_database_url() -> tuple[str, bool]:
+def _resolve_database_url() -> tuple[str, dict[str, Any]]:
     """
     Normalise the database URL for the correct async driver.
 
-    Returns (url, needs_ssl) where needs_ssl=True means the original URL asked
-    for SSL via sslmode=require/verify-ca/verify-full.
+    Returns (url, connect_args). Provider DSNs often include libpq query params;
+    asyncpg wants the important ones as keyword arguments instead.
 
     Problems solved:
     1. Vercel Postgres gives  postgres://  — SQLAlchemy asyncpg needs
@@ -60,25 +61,41 @@ def _resolve_database_url() -> tuple[str, bool]:
     # SQLite URLs because it drops one of the three leading slashes
     # (sqlite+aiosqlite:///./data.db → sqlite+aiosqlite:/./data.db).
     if url.startswith("sqlite"):
-        return url, False
+        return url, {}
 
     parts = urlsplit(url)
     query_pairs = parse_qsl(parts.query, keep_blank_values=True)
     kept_pairs: list[tuple[str, str]] = []
-    sslmode = ""
+    connect_args: dict[str, Any] = {}
     for key, value in query_pairs:
-        if key.lower() == "sslmode":
+        key_lower = key.lower()
+        if key_lower == "sslmode":
             sslmode = value.lower()
+            if sslmode in {"require", "verify-ca", "verify-full"}:
+                # asyncpg 0.30 expects bool or SSLContext here, not the libpq
+                # string "require".
+                connect_args["ssl"] = True
+            elif sslmode == "disable":
+                connect_args["ssl"] = False
+        elif key_lower == "connect_timeout":
+            try:
+                connect_args["timeout"] = float(value)
+            except ValueError:
+                logger.warning("Ignoring invalid Postgres connect_timeout=%r", value)
+        elif key_lower == "channel_binding":
+            # Some managed Postgres URLs include libpq's channel_binding option;
+            # asyncpg.connect has no matching kwarg, so passing it through makes
+            # Lambda cold starts fail before the app can serve diagnostics.
+            continue
         else:
             kept_pairs.append((key, value))
 
-    needs_ssl = sslmode in {"require", "verify-ca", "verify-full"}
     url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept_pairs), parts.fragment))
 
-    return url, needs_ssl
+    return url, connect_args
 
 
-_DATABASE_URL, _POSTGRES_SSL = _resolve_database_url()
+_DATABASE_URL, _POSTGRES_CONNECT_ARGS = _resolve_database_url()
 
 
 def _engine_kwargs() -> dict:
@@ -94,10 +111,24 @@ def _engine_kwargs() -> dict:
         kw["pool_size"] = 1
         kw["max_overflow"] = 0
         kw["pool_pre_ping"] = True
-        if _POSTGRES_SSL:
-            # Pass ssl as a connect_arg — asyncpg understands this, not sslmode
-            kw["connect_args"] = {"ssl": "require"}
+        connect_args = dict(_POSTGRES_CONNECT_ARGS)
+        if os.environ.get("VERCEL") and "timeout" not in connect_args:
+            # Fail fast enough that /healthz can report the problem instead of
+            # the whole serverless invocation hanging until Vercel kills it.
+            connect_args["timeout"] = 5.0
+        if connect_args:
+            kw["connect_args"] = connect_args
     return kw
+
+
+def database_runtime_summary() -> dict[str, str]:
+    """Safe, non-secret DB diagnostics for /healthz."""
+    return {
+        "database_scheme": urlsplit(_DATABASE_URL).scheme,
+        "database_is_postgres": str(_DATABASE_URL.startswith("postgresql+asyncpg")).lower(),
+        "database_ssl": str(bool(_POSTGRES_CONNECT_ARGS.get("ssl"))).lower(),
+        "database_timeout_s": str(_engine_kwargs().get("connect_args", {}).get("timeout", "")),
+    }
 
 
 engine: AsyncEngine = create_async_engine(_DATABASE_URL, **_engine_kwargs())
