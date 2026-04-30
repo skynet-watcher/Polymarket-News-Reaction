@@ -18,7 +18,7 @@ import re
 from typing import Any, Optional
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionLocal
@@ -225,60 +225,67 @@ def _parse_intraperiod(
     }
 
 
+def _extract_markets(data: Any) -> list[dict[str, Any]]:
+    """
+    Gamma returns either a flat list or a paginated envelope like
+    {"data": [...], "count": N}. Handle both.
+    """
+    if isinstance(data, list):
+        return [m for m in data if isinstance(m, dict)]
+    if isinstance(data, dict):
+        inner = data.get("data") or data.get("markets") or data.get("results") or []
+        if isinstance(inner, list):
+            return [m for m in inner if isinstance(m, dict)]
+    return []
+
+
 async def _fetch_crypto_candidates(
     limit: int,
     include_resolved: bool,
     min_liquidity: Optional[float],
 ) -> list[dict[str, Any]]:
     """
-    Pull candidate markets from Gamma using targeted keyword searches.
-    The Gamma API `category` filter is unreliable; instead we run multiple
-    specific keyword searches that match Up/Down candle market titles.
+    Bulk-paginate ALL active markets from Gamma (no keyword filter — the API
+    doesn't support reliable free-text search). We fetch up to 500 markets in
+    pages of 100 and filter locally for Up/Down candle patterns.
     """
     candidates: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
+    page_size = 100
+    max_markets = 500  # 5 pages — more than enough to find all crypto Up/Down markets
 
-    # These phrases appear in the title of real Polymarket Up/Down candle markets.
-    # Use `q` (full-text search) which the Gamma API actually supports.
-    keyword_queries = [
-        "up or down",
-        "higher or lower",
-        "BTC up",
-        "ETH up",
-        "SOL up",
-        "bitcoin up",
-        "ethereum up",
-        "solana up",
-        "crypto up",
-        "will BTC",
-        "will ETH",
-        "will bitcoin",
-        "will ethereum",
-    ]
-
-    base_params: dict[str, Any] = {"active": "true", "limit": 50}
+    base_params: dict[str, Any] = {
+        "active": "true",
+        "limit": page_size,
+    }
     if not include_resolved:
         base_params["closed"] = "false"
 
     async with polymarket_async_client() as client:
-        for kw in keyword_queries:
-            if len(candidates) >= limit * 4:
-                break
+        offset = 0
+        while len(candidates) < max_markets:
             try:
-                params = {**base_params, "q": kw}
+                params = {**base_params, "offset": offset}
                 r = await client.get(f"{_GAMMA_BASE}/markets", params=params)
-                if r.status_code == 200:
-                    data = r.json()
-                    if isinstance(data, list):
-                        for m in data:
-                            mid = str(m.get("id") or "").strip()
-                            if mid and mid not in seen_ids:
-                                seen_ids.add(mid)
-                                candidates.append(m)
+                if r.status_code != 200:
+                    logger.warning("crypto_preflight: Gamma returned %d at offset %d", r.status_code, offset)
+                    break
+                page = _extract_markets(r.json())
+                if not page:
+                    break  # no more results
+                for m in page:
+                    mid = str(m.get("id") or "").strip()
+                    if mid and mid not in seen_ids:
+                        seen_ids.add(mid)
+                        candidates.append(m)
+                if len(page) < page_size:
+                    break  # last page
+                offset += page_size
             except Exception:
-                logger.warning("crypto_preflight: keyword query '%s' failed", kw)
+                logger.exception("crypto_preflight: Gamma fetch failed at offset %d", offset)
+                break
 
-    logger.info("crypto_preflight: fetched %d candidate markets across %d keyword queries", len(candidates), len(keyword_queries))
+    logger.info("crypto_preflight: fetched %d total markets from Gamma (%d pages)", len(candidates), offset // page_size + 1)
     return candidates
 
 
@@ -458,6 +465,10 @@ async def run(
     }
 
     async with SessionLocal() as session:
+        # Wipe all previous results so stale markets don't persist across scans.
+        await session.execute(delete(CryptoMarketProfile))
+        await session.flush()
+
         for raw in filtered:
             try:
                 profile_data = await _process_one(raw, now, min_liquidity)
