@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
+_DEFAULT_SQLITE_URL = "sqlite+aiosqlite:///./data.db"
+_VERCEL_EPHEMERAL_SQLITE_URL = "sqlite+aiosqlite:////tmp/polymarket-news-reaction.db"
 
 
 def _configured_database_url() -> str:
@@ -20,10 +22,12 @@ def _configured_database_url() -> str:
 
     Local/dev uses DATABASE_URL via Settings. Vercel Postgres commonly injects
     POSTGRES_URL_* variables when a database is connected to the project, and
-    may not provide DATABASE_URL unless the operator adds it manually.
+    may not provide DATABASE_URL unless the operator adds it manually. If no
+    Postgres URL exists on Vercel, fall back to /tmp SQLite so the app boots
+    instead of trying to create ./data.db in the read-only Lambda bundle.
     """
     configured = (settings.database_url or "").strip()
-    if configured and configured != "sqlite+aiosqlite:///./data.db":
+    if configured and configured != _DEFAULT_SQLITE_URL:
         return configured
 
     if os.environ.get("VERCEL"):
@@ -31,8 +35,9 @@ def _configured_database_url() -> str:
             value = (os.environ.get(key) or "").strip()
             if value:
                 return value
+        return _VERCEL_EPHEMERAL_SQLITE_URL
 
-    return configured or "sqlite+aiosqlite:///./data.db"
+    return configured or _DEFAULT_SQLITE_URL
 
 
 def _resolve_database_url() -> tuple[str, dict[str, Any]]:
@@ -123,9 +128,11 @@ def _engine_kwargs() -> dict:
 
 def database_runtime_summary() -> dict[str, str]:
     """Safe, non-secret DB diagnostics for /healthz."""
+    ephemeral = _DATABASE_URL == _VERCEL_EPHEMERAL_SQLITE_URL
     return {
         "database_scheme": urlsplit(_DATABASE_URL).scheme,
         "database_is_postgres": str(_DATABASE_URL.startswith("postgresql+asyncpg")).lower(),
+        "database_persistence": "ephemeral" if ephemeral else "persistent",
         "database_ssl": str(bool(_POSTGRES_CONNECT_ARGS.get("ssl"))).lower(),
         "database_timeout_s": str(_engine_kwargs().get("connect_args", {}).get("timeout", "")),
     }

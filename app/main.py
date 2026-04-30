@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 import time
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, func
@@ -58,6 +60,44 @@ app = FastAPI(title="Polymarket News-Reaction (Paper MVP)")
 templates = Jinja2Templates(directory="app/templates")
 
 templates.env.filters["format_lag"] = format_lag_seconds
+
+
+@app.exception_handler(Exception)
+async def _vercel_runtime_exception_handler(request: Request, exc: Exception) -> HTMLResponse | JSONResponse:
+    if not os.environ.get("VERCEL"):
+        raise exc
+
+    STARTUP_STATE.update(
+        {
+            "status": "error",
+            "error_type": type(exc).__name__,
+            "error": str(exc)[:500],
+        }
+    )
+    logger.exception("request failed on Vercel: %s %s", request.method, request.url.path)
+    payload = {
+        "ok": "false",
+        "app": "polymarket-news-reaction",
+        "path": request.url.path,
+        "error_type": type(exc).__name__,
+        "error": str(exc)[:500],
+        **database_runtime_summary(),
+    }
+    if request.url.path.startswith("/api/") or request.url.path == "/healthz":
+        return JSONResponse(payload, status_code=503)
+    html = f"""
+    <!doctype html>
+    <html>
+      <head><title>Polymarket News Reaction - Vercel diagnostics</title></head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 32px; line-height: 1.45;">
+        <h1>App is deployed, but startup needs attention</h1>
+        <p>The Vercel function is alive. The application hit a runtime error while opening the dashboard.</p>
+        <pre style="white-space: pre-wrap; background: #f5f5f5; padding: 16px; border-radius: 8px;">{html.escape(str(payload))}</pre>
+        <p>Open <a href="/healthz">/healthz</a> for the compact diagnostic response.</p>
+      </body>
+    </html>
+    """
+    return HTMLResponse(html, status_code=503)
 
 
 @app.on_event("startup")

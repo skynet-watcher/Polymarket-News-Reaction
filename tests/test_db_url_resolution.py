@@ -26,3 +26,16 @@ def test_resolve_database_url_preserves_explicit_database_url(monkeypatch) -> No
 
     assert url == "sqlite+aiosqlite:///./local.db"
     assert connect_args == {}
+
+
+def test_vercel_without_postgres_uses_tmp_sqlite(monkeypatch) -> None:
+    monkeypatch.setattr(db.settings, "database_url", "sqlite+aiosqlite:///./data.db")
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.delenv("POSTGRES_URL_NON_POOLING", raising=False)
+    monkeypatch.delenv("POSTGRES_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_PRISMA_URL", raising=False)
+
+    url, connect_args = db._resolve_database_url()
+
+    assert url == "sqlite+aiosqlite:////tmp/polymarket-news-reaction.db"
+    assert connect_args == {}

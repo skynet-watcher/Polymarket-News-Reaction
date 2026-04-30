@@ -289,6 +289,8 @@ If the main dashboard returns a 500 immediately after deploy, open `/healthz` fi
 
 Verify the project has either `DATABASE_URL` or Vercel/Neon's `POSTGRES_URL_NON_POOLING` / `POSTGRES_URL` env vars in the same environment you deployed.
 
+Emergency boot fallback: when `VERCEL=1` is set and no Postgres URL is present, the app uses `sqlite+aiosqlite:////tmp/polymarket-news-reaction.db`. This is only to keep the deployment alive while database wiring is being fixed. It is ephemeral Lambda storage, so rows can disappear whenever Vercel starts a new function instance. `/healthz` will report `"database_persistence": "ephemeral"` in this mode.
+
 **Verify Vercel is running the right code:** open `/healthz` on the deployed URL. The response is intentionally self-identifying:
 
 ```json
