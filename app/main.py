@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any
 
@@ -22,7 +23,7 @@ from app import background_loops
 from app.jobs import sync_markets, settle_trades, poll_news, process_candidates
 from app.realtime_policy import invested_hours_to_resolution, next_snapshot_tick_sleep_seconds
 from app.settings import settings
-from app.routers import api, ui
+from app.routers import api, crons, ui
 from app.util import format_lag_seconds
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,14 @@ async def _startup() -> None:
                 logger.exception("background snapshot loop failed")
             await asyncio.sleep(sleep_s)
 
+    # On Vercel (serverless) background asyncio tasks are pointless — the process
+    # exits after each request.  Scheduling is handled by Vercel Cron + the
+    # /api/cron/* endpoints instead.
+    _on_vercel = bool(os.environ.get("VERCEL"))
+    if _on_vercel:
+        logger.info("startup: running on Vercel — background loops disabled, cron endpoints active")
+        return
+
     asyncio.create_task(_snapshot_loop())
 
     async def _warm_start() -> None:
@@ -167,6 +176,7 @@ async def healthz() -> dict[str, str]:
 
 
 app.include_router(api.router, prefix="/api")
+app.include_router(crons.router, prefix="/api")
 app.include_router(ui.router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

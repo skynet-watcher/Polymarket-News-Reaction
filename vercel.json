@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "api/index.py", "use": "@vercel/python" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "api/index.py" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/pipeline",
+      "schedule": "0 8 * * *",
+      "comment": "Daily pipeline: sync markets → poll news → process candidates → settle trades (8 AM UTC). Hobby plan = 1 cron/day max. For more frequent runs use cron-job.org (free) pointing at this endpoint."
+    },
+    {
+      "path": "/api/cron/settle",
+      "schedule": "0 20 * * *",
+      "comment": "Evening settlement pass (8 PM UTC) to catch same-day resolutions."
+    }
+  ]
+}

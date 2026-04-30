@@ -9,6 +9,13 @@ from app.models import Base
 async def init_db(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # All migrations below are SQLite-only (they use PRAGMA which Postgres
+        # doesn't have).  On Postgres (Vercel) create_all already produces the
+        # correct schema so no manual column additions are needed.
+        if engine.dialect.name != "sqlite":
+            return
+
         # Minimal migration support for SQLite: add new columns if missing.
         # (SQLAlchemy create_all does not alter existing tables.)
         await _ensure_column(conn, table="price_snapshots", column="spread", ddl="ALTER TABLE price_snapshots ADD COLUMN spread FLOAT")
