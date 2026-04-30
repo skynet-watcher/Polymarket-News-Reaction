@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 _sync_markets_lock = asyncio.Lock()
 
 RUNTIME_KEY_SYNC_MARKETS_SOURCE = "sync_markets_data_source"
+
+
+def _on_vercel() -> bool:
+    return bool(os.environ.get("VERCEL"))
 
 
 def _is_binary(outcomes: list[str]) -> bool:
@@ -104,6 +109,7 @@ async def _fetch_gamma_events(
     events: list[dict[str, Any]] = []
     offset = 0
     extra_params = extra_params or {}
+    max_offset = 0 if _on_vercel() else 2000
     while True:
         params: Dict[str, Any] = {"limit": limit, "offset": offset, **extra_params}
         r = await get_with_retry(client, url, params=params)
@@ -113,7 +119,7 @@ async def _fetch_gamma_events(
         if len(batch) < limit:
             break
         offset += limit
-        if offset >= 2000:
+        if offset >= max_offset:
             break
     return events
 
@@ -129,6 +135,7 @@ async def _fetch_gamma_markets(
     offset = 0
     extra_params = extra_params or {}
     url = f"{settings.polymarket_gamma_base_url}/markets"
+    max_offset = 0 if _on_vercel() else 2000
     while True:
         params: Dict[str, Any] = {"limit": limit, "offset": offset, **extra_params}
         r = await get_with_retry(client, url, params=params)
@@ -140,7 +147,7 @@ async def _fetch_gamma_markets(
         if len(batch) < limit:
             break
         offset += limit
-        if offset >= 2000:
+        if offset >= max_offset:
             break
     return markets
 
@@ -239,13 +246,13 @@ async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str
     markets_exc: Optional[Exception] = None
 
     try:
-        from_events = await _fetch_gamma_open_and_closed_via_events(client, limit=100)
+        from_events = await _fetch_gamma_open_and_closed_via_events(client, limit=25 if _on_vercel() else 100)
     except (httpx.HTTPError, httpx.RequestError) as e:
         from_events = []
         events_exc = e
 
     try:
-        from_markets = await _fetch_gamma_open_and_closed_markets_fallback(client, limit=200)
+        from_markets = await _fetch_gamma_open_and_closed_markets_fallback(client, limit=50 if _on_vercel() else 200)
     except (httpx.HTTPError, httpx.RequestError) as e:
         from_markets = []
         markets_exc = e
@@ -255,7 +262,7 @@ async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str
         raise markets_exc
 
     # Near-resolution sweep is optional — never blocks on failure.
-    near_resolution = await _fetch_near_resolution_markets(client, within_hours=48, limit=50)
+    near_resolution = await _fetch_near_resolution_markets(client, within_hours=48, limit=25 if _on_vercel() else 50)
 
     by_id: dict[str, dict[str, Any]] = {}
 
@@ -524,7 +531,8 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
 
             best_bid: Optional[float] = None
             best_ask: Optional[float] = None
-            if enable_ob and token_ids_yes and clob_attempted < settings.sync_clob_snapshot_limit:
+            clob_limit = min(settings.sync_clob_snapshot_limit, 10) if _on_vercel() else settings.sync_clob_snapshot_limit
+            if enable_ob and token_ids_yes and clob_attempted < clob_limit:
                 clob_attempted += 1
                 best_bid, best_ask = await _fetch_best_bid_ask_yes(client, token_ids_yes)
             elif enable_ob and token_ids_yes:

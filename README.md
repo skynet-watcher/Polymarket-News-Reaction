@@ -316,6 +316,8 @@ Use `git_commit` to compare the deployment to GitHub `main`. The current product
 
 **Function timeout:** Vercel Hobby functions default to 10s and can be configured up to 60s. Short jobs (sync, settle, poll) should fit. `process_candidates` with LLM calls may timeout under heavy load — use the Hobby plan for read-heavy dashboarding and trigger heavy jobs manually or via an external cron service.
 
+To keep manual market sync usable on Vercel, `sync_markets` uses a thin serverless pass when `VERCEL=1`: one Gamma page per source and at most 10 CLOB orderbook snapshots. Local runs still use the broader pagination limits. This is a deliberate deployment compromise so the Hobby plan can populate live markets without timing out.
+
 ---
 
 ## Backtesting
