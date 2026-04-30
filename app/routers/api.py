@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dashboard_data import get_dashboard_snapshot
 from app.db import SessionLocal, get_session
 from app.job_status import build_system_status, run_tracked_job
-from app.security import verify_bearer_secret
 from app.settings import settings
 from app.util import now_utc
 from app.jobs import backtest_news_reactions, btc_signal_test, bulk_smoke_test, compute_lag, crypto_preflight, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
@@ -72,38 +71,38 @@ def _job_response(request: Request, payload: dict, redirect_url: str) -> Union[J
     return RedirectResponse(url=redirect_url, status_code=303)
 
 
-@router.post("/jobs/seed_live_feeds", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/seed_live_feeds", response_model=None)
 async def job_seed_live_feeds(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
     """Re-run default RSS upsert (see `app/live_feeds.py`)."""
     out = await run_tracked_job(session, "seed_live_feeds", lambda: ensure_live_news_sources(session))
     return _job_response(request, out, "/settings")
 
 
-@router.post("/jobs/sync_markets", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/sync_markets", response_model=None)
 async def job_sync_markets(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
     out = await run_tracked_job(session, "sync_markets", lambda: sync_markets.run(session))
     return _job_response(request, out, "/markets")
 
 
-@router.post("/jobs/poll_news", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/poll_news", response_model=None)
 async def job_poll_news(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
     out = await run_tracked_job(session, "poll_news", lambda: poll_news.run(session))
     return _job_response(request, out, "/news")
 
 
-@router.post("/jobs/process_candidates", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/process_candidates", response_model=None)
 async def job_process_candidates(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
     out = await run_tracked_job(session, "process_candidates", lambda: process_candidates.run(session))
     return _job_response(request, out, "/signals")
 
 
-@router.post("/jobs/settle_trades", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/settle_trades", response_model=None)
 async def job_settle_trades(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
     out = await run_tracked_job(session, "settle_trades", lambda: settle_trades.run(session))
     return _job_response(request, out, "/trades")
 
 
-@router.post("/jobs/backtest_news_reactions", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/backtest_news_reactions", response_model=None)
 async def job_backtest_news_reactions(
     request: Request,
     session: AsyncSession = Depends(get_session),
@@ -124,7 +123,7 @@ async def job_backtest_news_reactions(
     return _job_response(request, out, "/analysis/backtests")
 
 
-@router.post("/lag-measurements/backfill", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/lag-measurements/backfill", response_model=None)
 async def backfill_lag_measurements(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -162,7 +161,7 @@ async def export_summary(session: AsyncSession = Depends(get_session)) -> dict[s
     }
 
 
-@router.post("/jobs/bulk_smoke_test", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/bulk_smoke_test", response_model=None)
 async def job_bulk_smoke_test(
     request: Request,
     count: int = Query(20, ge=1, le=50, description="Number of trades to place (max 50)"),
@@ -189,7 +188,7 @@ async def job_bulk_smoke_test(
     )
 
 
-@router.post("/jobs/btc_signal_test", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/btc_signal_test", response_model=None)
 async def job_btc_signal_test(
     request: Request,
     move_threshold_pct: float = Query(0.5, ge=0.0, le=50.0, description="Min BTC move % to fire a trade"),
@@ -220,19 +219,19 @@ async def job_btc_signal_test(
     return RedirectResponse(url=redirect, status_code=303)
 
 
-@router.post("/jobs/compute_signal_metrics", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/compute_signal_metrics", response_model=None)
 async def job_compute_signal_metrics(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
     out = await run_tracked_job(session, "signal_metrics", lambda: signal_metrics.run_backfill(session, limit=200))
     return _job_response(request, out, "/analysis")
 
 
-@router.post("/jobs/compute_lag_ranks", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/compute_lag_ranks", response_model=None)
 async def job_compute_lag_ranks(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
     out = await run_tracked_job(session, "lag_ranks", lambda: lag_rank.run(session))
     return _job_response(request, out, "/analysis/laggy-markets")
 
 
-@router.post("/jobs/crypto_preflight", response_model=None, dependencies=[Depends(verify_bearer_secret)])
+@router.post("/jobs/crypto_preflight", response_model=None)
 async def job_crypto_preflight(
     request: Request,
     market_limit: int = Query(25, ge=1, le=100, description="Max markets to scan"),

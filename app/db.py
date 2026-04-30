@@ -34,6 +34,12 @@ def _resolve_database_url() -> tuple[str, bool]:
     elif url.startswith("postgresql://") and "+asyncpg" not in url:
         url = "postgresql+asyncpg://" + url[len("postgresql://"):]
 
+    # Only strip sslmode from Postgres URLs.  urlunsplit cannot round-trip
+    # SQLite URLs because it drops one of the three leading slashes
+    # (sqlite+aiosqlite:///./data.db → sqlite+aiosqlite:/./data.db).
+    if "sqlite" in url:
+        return url, False
+
     parts = urlsplit(url)
     query_pairs = parse_qsl(parts.query, keep_blank_values=True)
     kept_pairs: list[tuple[str, str]] = []
