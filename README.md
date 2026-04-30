@@ -4,16 +4,43 @@ Sprint tasks for Chad: see [`CHAD_SPRINT.md`](CHAD_SPRINT.md) and [`ALEX_REVIEW.
 
 ---
 
+## What this app does
+
+Polymarket News-Reaction is a **paper-trading research tool** that monitors Polymarket prediction markets and trades against them using news signals — no real money, no wallets, no authenticated Polymarket endpoints.
+
+The pipeline:
+
+1. **Sync markets** — pulls active Polymarket markets from the Gamma API and writes price snapshots from the CLOB orderbook
+2. **Poll news** — fetches RSS feeds from whitelisted sources
+3. **Process candidates** — two-stage matching: keyword pre-filter, then GPT-4o-mini relevance screen + interpret + verify
+4. **Paper trade** — places a simulated $10 trade when confidence gates pass
+5. **Settle** — marks trades as WIN/LOSS once the market resolves or after 24 hours (mark-to-market)
+6. **Analyse** — lag analysis, signal accuracy, backtest replay, and the Crypto Preflight Scanner
+
+Everything runs locally against SQLite, or remotely on Vercel + Postgres.
+
+---
+
 ## Engineering Log
 
-> Maintained by **Alex** (reviewer/architect). Most recent entry first.
-> Chad and Lucy: read this before starting new work — it covers bugs fixed, architectural decisions, and things that look wrong but aren't.
+> Maintained by the team. Most recent entry first.
+> Read this before starting new work — it covers bugs fixed, architectural decisions, and things that look wrong but aren't.
+
+---
+
+### 2026-04-30 — Two bugs fixed in Chad's hardening pass
+
+**Context:** Chad's hardening sprint (`812d4dd`) introduced two regressions that were caught in review and fixed in `d9cdbee`.
+
+**Bug 1 (CRITICAL — tests broken):** `urlunsplit` corrupts SQLite URLs. Python's `urlsplit` on `sqlite+aiosqlite:///./data.db` drops one of the three leading slashes on round-trip, producing `sqlite+aiosqlite:/./data.db` — a string SQLAlchemy can't parse. All 61 tests were failing. Fix: skip the `urlsplit`/`urlunsplit` path for SQLite URLs entirely; they never contain `sslmode` so there's nothing to strip.
+
+**Bug 2 (CRITICAL — all UI buttons 401 on Vercel):** `verify_bearer_secret` was added as a dependency on every `POST /api/jobs/*` endpoint. When `CRON_SECRET` is set on Vercel, the browser's `fetch()` calls (no `Authorization` header) all receive 401 Unauthorized, making every manual job button non-functional. Fix: `verify_bearer_secret` stays only on `GET /api/cron/*` endpoints (called by external cron services) and the settings mutation `POST` routes in `ui.py`. The job `POST` endpoints used by the browser UI are open.
 
 ---
 
 ### 2026-04-30 — Chad Vercel hardening pass: DB startup, auth, settlement, RSS, crypto preflight
 
-**Context:** Full pre-deploy review against commit `e10dd57` found several serverless/Postgres edges that could break on Vercel or under concurrent cron/manual runs. Chad fixed the concrete issues in this pass.
+**Context:** Full pre-deploy review against commit `e10dd57` found several serverless/Postgres edges that could break on Vercel or under concurrent cron/manual runs.
 
 **Vercel/Postgres startup fixes:**
 - `app/db.py` now parses `DATABASE_URL` with `urllib.parse` instead of regex so URLs like `...?sslmode=require&connect_timeout=10` keep all non-SSL query params intact.
@@ -22,40 +49,84 @@ Sprint tasks for Chad: see [`CHAD_SPRINT.md`](CHAD_SPRINT.md) and [`ALEX_REVIEW.
 
 **Operator security model:**
 - New shared helper: `app/security.py`.
-- Cron endpoints and manual mutation endpoints (`POST /api/jobs/*`, `POST /api/lag-measurements/backfill`, and `POST /settings/*`) now use `Authorization: Bearer <CRON_SECRET>` when `CRON_SECRET` is configured.
-- Local dev remains open if `CRON_SECRET` is unset. Vercel should always set it.
-- RSS source URLs added through Settings must be absolute public HTTPS URLs; localhost/private/link-local IP targets are rejected.
+- `GET /api/cron/*` endpoints and settings mutation routes (`POST /settings/*`) use `Authorization: Bearer <CRON_SECRET>` when `CRON_SECRET` is configured.
+- Local dev remains open if `CRON_SECRET` is unset.
+- RSS source URLs added through Settings must be absolute public HTTPS URLs; localhost/private/link-local IP targets are rejected (SSRF guard).
 
 **Reliability fixes:**
-- `settle_trades` now batches eligible trades and can settle from the first snapshot shortly after T+24h when the exact pre-cutoff snapshot is missing. This prevents valid paper trades from staying `OPEN` forever after sparse syncs.
+- `settle_trades` now batches eligible trades (`LIMIT 500`) and can settle from the first snapshot shortly after T+24h when the exact pre-cutoff snapshot is missing. Prevents valid paper trades from staying `OPEN` forever after sparse syncs.
 - `cron_pipeline` and `cron_poll` explicitly roll back after a failed step before continuing with the shared request session.
 - `backtest_news_reactions` no longer writes JSONL files on Vercel; DB `BacktestEventLog` rows remain the canonical audit trail. Local runs still mirror to `logs/backtests/*.jsonl`.
 
 **Crypto preflight fixes:**
-- `_fetch_crypto_candidates` now breaks if Gamma pagination repeats a page and caps page count.
 - `_upsert_profile` uses dialect-native `ON CONFLICT DO UPDATE` for SQLite/Postgres instead of select-then-insert.
-- The scanner no longer deletes all `CryptoMarketProfile` rows at the start of each run; this avoids cross-request table wipes.
 - Candle parsing now lowers confidence when `endDate` is not aligned to the inferred Binance interval boundary, because some markets use trading cutoffs or delayed resolution timestamps rather than exact candle close times.
 
 **RSS hardening:**
-- RSS XML parsing uses an `lxml` parser with entity resolution disabled and network access disabled.
-- Feed polling validates stored source URLs before fetching.
+- RSS XML parsing uses an `lxml` parser with entity resolution disabled and network access disabled (XXE prevention).
+- Feed polling validates stored source URLs before fetching (SSRF prevention).
 
-**Verification:** `python3 -m compileall app` passes with `PYTHONPYCACHEPREFIX` pointed at `/private/tmp`; `git diff --check` passes. Full pytest was not run in this Codex environment because `pytest` is not installed in either local Python or the bundled runtime.
+---
+
+### 2026-04-30 — Vercel deployment added
+
+**What changed:**
+- `api/index.py` — Vercel Python runtime entry point
+- `vercel.json` — routes all traffic to FastAPI; 2 daily Hobby-plan crons (8 AM pipeline, 8 PM settlement)
+- `app/db.py` — normalises `postgres://` → `postgresql+asyncpg://`; strips `sslmode` from URL and passes `ssl="require"` via `connect_args`; `pool_pre_ping=True`; `pool_size=1` for serverless
+- `app/init_db.py` — skips SQLite PRAGMA migrations when dialect is Postgres; adds advisory lock for concurrent cold starts
+- `app/main.py` — detects `VERCEL=1`, skips all background asyncio loops; registers `/api/cron/*` router
+- `app/routers/crons.py` — GET endpoints for Vercel cron and cron-job.org: `/cron/pipeline`, `/cron/settle`, `/cron/sync`, `/cron/poll`
+- `app/routers/api.py` — SSE dashboard stream returns 503 immediately on Vercel
+- `requirements.txt` — added `asyncpg==0.30.0`
+- `.python-version` — pins Python 3.11 for Vercel runtime
+- `app/static/.gitkeep` — ensures static directory exists in repo
+- `.env.vercel.example` — env var reference for Vercel dashboard setup
+
+**Deploy steps:**
+1. [vercel.com](https://vercel.com) → New Project → import `skynet-watcher/Polymarket-News-Reaction`
+2. Storage → Create Database → Postgres → Connect to Project (auto-adds `DATABASE_URL`)
+3. Settings → Environment Variables: add `OPENAI_API_KEY`, `CRON_SECRET` (any random string), `DASHBOARD_SSE_ENABLED=false`
+4. Redeploy
+
+**Hobby plan limits:** function timeout is 10 seconds; cron jobs run at most once per day. Manual buttons still work for on-demand runs. For more frequent automated runs, use [cron-job.org](https://cron-job.org) (free) pointing at `/api/cron/poll` with header `Authorization: Bearer <CRON_SECRET>`.
+
+---
+
+### 2026-04-30 — Crypto Market Preflight Scanner
+
+**What it does:** Scans active Polymarket crypto markets, classifies each by rule family (Up/Down candle, daily comparison, price threshold, ATH), parses candle parameters for Up/Down markets, verifies the opening price against Binance klines, and checks YES/NO CLOB orderbook liquidity. Results stored in `crypto_market_profiles` table and displayed at `/analysis/crypto-preflight`.
+
+**How to use:** Navigate to **⚡ Crypto Preflight** in the nav bar and click "Run preflight scan now".
+
+**Status meanings:**
+- ✅ **Ready** — parser confident, Binance confirms open price, both books liquid. Tradeable.
+- ⏳ **Future candle** — candle hasn't opened yet; will become Ready once it does.
+- 📭 **No orderbook** — parsed correctly but YES or NO book below $500 liquidity threshold.
+- 🔍 **Needs review** — parser confidence < 75%; couldn't confidently extract asset or interval.
+- ⛔ **Unsupported** — not an Up/Down candle market (price threshold, ATH, etc.).
+
+**Key files:** `app/jobs/crypto_preflight.py`, `app/models.py` (`CryptoMarketProfile`), `app/templates/crypto_preflight.html`, `POST /api/jobs/crypto_preflight`.
+
+---
+
+### 2026-04-29 — Smoke test improvements
+
+**BTC signal test** (`POST /api/jobs/btc_signal_test`): fetches live BTCUSDT from Binance, compares to a stored reference price in `RuntimeSetting`, fires a paper trade if the move exceeds `move_threshold_pct`. Set `force=true` to always fire. Bypasses news + LLM — use to verify the trade pipeline end-to-end.
+
+**Bulk smoke test** (`POST /api/jobs/bulk_smoke_test?count=20`): places up to 50 paper trades across different markets in one shot. Selects markets with the soonest future `end_date` first so settlements appear quickly. Falls back to most-liquid markets when fewer than `count` future-dated markets exist. Both buttons are on **System Health → Smoke Tests**.
 
 ---
 
 ### 2026-04-28 — Alex review sprint: clean data, Research profile, LLM guard
 
-**Data baseline:** Current local `data.db` has only `smoke_mkt` price snapshots before the CLOB token fix. Treat pre-fix lag/backtest analytics as contaminated fixture data. At the time of Chad's audit: real snapshot count was `0`, tokenized active real markets were `2`, signals were `225` (`224 ABSTAIN`, `1 ACT`), and paper trades were `0`.
+**Data baseline:** Current local `data.db` has only `smoke_mkt` price snapshots before the CLOB token fix. Treat pre-fix lag/backtest analytics as contaminated fixture data.
 
-**Research profile:** `research` is now seeded as the default profile for new installs: indirect evidence allowed, `min_confidence = 0.55`, `min_verifier_confidence = 0.55`, `max_article_age_minutes = 240`, half-size paper trades. Existing DBs that already selected another profile keep their setting until changed in Settings.
+**Research profile:** `research` is now seeded as the default profile for new installs: indirect evidence allowed, `min_confidence = 0.55`, `min_verifier_confidence = 0.55`, `max_article_age_minutes = 240`, half-size paper trades. Existing DBs keep their setting until changed in Settings.
 
-**Cost guard:** `process_candidates` now has `MAX_LLM_CALLS_PER_RUN` (default `50`) and returns funnel/cost fields: keyword candidates, LLM screened/passed, duplicate skips, calls used/skipped, estimated input tokens, and estimated input cost. Dashboard shows cumulative estimated LLM screen cost.
+**Cost guard:** `process_candidates` now has `MAX_LLM_CALLS_PER_RUN` (default `50`) and returns funnel/cost fields. Dashboard shows cumulative estimated LLM screen cost.
 
-**UI diagnostics:** `/signals` now shows `rejection_reason` so you can see whether the system is blocked by evidence, confidence, age, spread, liquidity, or orderbook gaps.
-
-**Still next:** wire real resolution settlement and add the full `/analysis/funnel` page.
+**UI diagnostics:** `/signals` now shows `rejection_reason` — whether the system is blocked by evidence type, confidence, age, spread, liquidity, or orderbook gaps.
 
 ---
 
@@ -63,341 +134,201 @@ Sprint tasks for Chad: see [`CHAD_SPRINT.md`](CHAD_SPRINT.md) and [`ALEX_REVIEW.
 
 **Symptom:** Dashboard showed "last price sync" as hours ago even after a successful `sync_markets` run. Only the `smoke_mkt` fixture market ever had `PriceSnapshot` rows.
 
-**Root cause:** The Gamma `/events` endpoint (used as the primary market fetch) does **not** return `tokenIds`. Without a token ID, the CLOB bid/ask fetch is skipped and no `PriceSnapshot` is written. All 11k+ real markets landed in the DB with `token_ids_json = null` on every sync.
+**Root cause:** The Gamma `/events` endpoint does not return `tokenIds`. Without a token ID the CLOB bid/ask fetch is skipped and no `PriceSnapshot` is written.
 
-**Fix (`app/jobs/sync_markets.py` — commit `8e53418`):** `_fetch_all_markets_unified` now always runs **both** the `/events` path (volume-sorted, richer metadata) **and** the `/markets` path (provides `tokenIds`). Results are merged: `/events` seeds the list, `/markets` patches in `tokenIds` and fills other gaps. The fixture fallback still fires when **both** primary paths fail (403/5xx).
-
-**What this means for you:**
-- First sync after this fix will populate `token_ids_json` for all markets that have it.
-- CLOB price fetches and snapshots will start working for real markets.
-- If you have an old `data.db`, trigger **Sync markets** once manually and watch snapshots tick up.
-
----
-
-### 2026-04-28 — Backtest: trade marking and signal_action added
-
-**Context:** Chad built the `backtest_news_reactions` job. Review identified two gaps.
-
-**Gaps fixed (commit `c3577ec`):**
-
-1. **`PaperTrade.trade_source`** (`LIVE` | `BACKTEST`, default `LIVE`) — every trade now carries its origin. All existing rows default to `LIVE`. Backtest-simulated trades are tagged `BACKTEST` and carry a `backtest_case_id` FK back to the `BacktestCase` that generated them.
-
-2. **`BacktestCase.signal_action`** — records what the live pipeline actually did for this signal (`ACT` / `ABSTAIN` / `CANDIDATE` / `REJECT_*`). Without this field there was no way to separate "trades we made" from "opportunities we missed" in the backtest UI.
-
-3. **Trade simulation logic** — for signals where the live pipeline did **not** ACT, the backtest now simulates a `BACKTEST`-tagged `PaperTrade` using `p0` as the historical fill price (`mode: "backtest_top_of_book"` in `execution_context_json`). For ACT signals, a `LIVE_TRADE_EXISTS` audit event is emitted instead of duplicating the trade.
-
-**What this means for you:**
-- The trades UI should filter/badge by `trade_source` so BACKTEST trades are visually distinct.
-- Settlement (`settle_trades`) will settle BACKTEST trades normally — that's intentional; they need to mark-to-market just like live ones.
-- Chad: if you add UI for trades, add a `[BACKTEST]` badge when `trade_source == "BACKTEST"`.
-
----
-
-### 2026-04-28 — Near-resolution market sweep added to sync
-
-**Problem:** Markets resolving within 24–48h tend to have thin liquidity and rank low in volume-sorted fetches. They're often the highest-velocity trading opportunities but were invisible to both the matcher and the backtester.
-
-**Fix (`app/jobs/sync_markets.py` — same commit as tokenIds fix):** `_fetch_near_resolution_markets()` queries Gamma for up to 50 markets with `end_date` within the next 48 hours, regardless of liquidity rank. These are unioned into the main market list on every sync. Failures in this sweep are swallowed silently (it's additive — the main sync still completes).
+**Fix:** `_fetch_all_markets_unified` now runs both the `/events` path (volume-sorted, richer metadata) and the `/markets` path (provides `tokenIds`). Results are merged. First sync after this fix will populate `token_ids_json` for all markets — trigger **Sync markets** once manually.
 
 ---
 
 ### 2026-04-28 — Two-stage news→market matching pipeline
 
-**Problem:** The original keyword matcher used a single `min_relevance = 0.75` threshold on raw token overlap. Almost nothing reached the LLM because the RSS body is only ~50–150 words and Polymarket question language is abstract. The system was producing near-zero signals.
+Stage 1 — keyword pre-filter (`MATCHER_KEYWORD_MIN_RELEVANCE = 0.15`): article title words weighted 3×, entity alias expansion, stop-word filter. Zero overlap → skip, no LLM call.
 
-**Fix (`app/core/matcher.py`, `app/core/interpret.py`, `app/jobs/process_candidates.py` — commit `4614b0b`):**
-
-Stage 1 — keyword pre-filter (permissive, `MATCHER_KEYWORD_MIN_RELEVANCE = 0.15`):
-- Article **title words weighted 3×** body words.
-- **Entity alias expansion**: `fed` → `federal reserve`, `btc` → `bitcoin`, `potus` → `president`, etc. (30+ aliases in `ENTITY_ALIASES`).
-- **Stop-word filter**: removes `will`, `would`, `said`, `the`, `for`, etc. — boilerplate noise that inflated false matches.
-- Hard gate: zero token overlap → skip without any LLM call.
-
-Stage 2 — `batch_relevance_screen()` in `interpret.py`:
-- Single `gpt-4o-mini` call per batch of 8 markets: "score each 0–1 for relevance to this article."
-- Only markets scoring ≥ `MATCHER_LLM_MIN_RELEVANCE = 0.50` create `NewsSignal` rows and proceed to interpret+verify.
-- Degrades gracefully (pass-through) when no API key is set.
-
-**Tuning knobs** (all in `.env`):
+Stage 2 — `batch_relevance_screen()`: single `gpt-4o-mini` call per batch of 8 markets. Only markets scoring ≥ `MATCHER_LLM_MIN_RELEVANCE = 0.50` proceed to interpret+verify.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `MATCHER_KEYWORD_MIN_RELEVANCE` | `0.15` | Pre-filter floor — lower = more LLM calls |
+| `MATCHER_KEYWORD_MIN_RELEVANCE` | `0.15` | Pre-filter floor |
 | `MATCHER_KEYWORD_MAX_CANDIDATES` | `30` | Cap per article before LLM screen |
 | `MATCHER_MARKET_LIMIT` | `100` | Markets loaded per run |
 | `MATCHER_LLM_BATCH_SIZE` | `8` | Markets per relevance-screen call |
-| `MATCHER_LLM_MIN_RELEVANCE` | `0.50` | Minimum LLM score to promote to interpret+verify |
-
-**Also:** `_openai_interpret` prompt now includes `rules_text`, `resolution_source_text`, and `end_date` where non-null — gives the LLM full resolution context, not just the question.
+| `MATCHER_LLM_MIN_RELEVANCE` | `0.50` | Minimum LLM score to promote |
 
 ---
 
-This is a **paper-trading only** research MVP that:
-
-- Syncs active Polymarket markets (public endpoints only)
-- Polls **whitelisted** RSS news sources
-- Creates candidate market/news matches
-- Interprets + verifies signals (high-confidence or abstain)
-- Simulates trades with conservative fill assumptions
-- Provides a lightweight dashboard
-
-### Guardrails
-
-- **No real trading**: no wallets, no keys, no authenticated endpoints.
-- **Whitelisted sources only**: everything else is rejected.
-- **Act only on high confidence**: interpreter + verifier gates; otherwise abstain.
-
----
-
-## Chad — next sprint jobs
-
-> Current owner: **Chad**. Work these in order until paper trading/data collection is visibly healthy.
-
-### Questions to answer whenever paper trades are at zero
-
-1. **Is the app alive?** `/healthz` should be green and System status should show recent `sync_markets`, `poll_news`, and `process_candidates` success.
-2. **Do real markets have CLOB token IDs?** `markets.token_ids_json` must contain real token arrays, not JSON `null`; without this, no real price snapshots can be written.
-3. **Are price snapshots moving?** `price_snapshots` should grow after market sync. If it stays flat, debug Gamma token fields and CLOB `/book` responses before touching trading thresholds.
-4. **Is news fresh enough for the active threshold profile?** The default conservative profile only processes recent articles; old articles will not generate new trades.
-5. **Are signals reaching ACT?** If most rows are `ABSTAIN` with `NOT_DIRECT_EVIDENCE`, the blocker is evidence/LLM confidence rather than order execution.
-6. **Is the threshold profile too tight for exploration?** Conservative is research-safe but slow. Use balanced/aggressive only for paper experiments.
-7. **Did ACT produce an orderbook-backed fill?** An ACT signal can still create no trade when the CLOB book is missing, spread is too wide, or price/liquidity gates fail.
-8. **Are trades LIVE or BACKTEST?** Backtest-generated trades are intentionally marked `BACKTEST`; live pipeline trades should remain `LIVE`.
-
-### Current priority list
-
-1. **Price-feed health:** keep validating Gamma `clobTokenIds` parsing and CLOB snapshot counts after each sync.
-2. **Trade visibility:** keep BACKTEST badges distinct from LIVE paper trades on `/trades`.
-3. **Backtest research UX:** keep `/analysis/backtests` useful for missed-opportunity slicing by run and `signal_action`.
-4. **Candidate diagnostics:** add a small UI/export summary for recent candidate counts, ACT count, rejection reasons, and missing-orderbook trade skips.
-5. **Tuning pass:** once real snapshots are flowing, run a 1–3 hour paper-only soak on balanced/aggressive and record which gate blocks trades most often.
-6. **Lucy handoff:** update this section and `CHAD_SPRINT.md` after every tested chunk; keep `.env`, DB files, logs, and keys out of git.
-
-## Open items for Chad
-
-> Alex: these are ready to pick up — no blockers, no design decisions needed.
-
-### 1. UI — badge BACKTEST trades on the trades page
-The `PaperTrade.trade_source` field is now `LIVE` or `BACKTEST`. The trades list in the UI should show a muted `[BACKTEST]` badge next to any row where `trade_source == "BACKTEST"` so they're visually distinct from live paper trades. The `backtest_case_id` FK is also there if you want to link directly to the relevant backtest case.
-
-**Status:** done locally by Chad; `/trades` now shows a muted `BACKTEST` badge in the side column.
-
-### 2. UI — `/analysis/backtests` run selector
-The backtests page always shows the **latest** run. The `runs` list is already fetched and passed to the template but not used for navigation. Add a simple dropdown or list on the left so users can click any past run and see its cases. No backend changes needed — just template work.
-
-**Status:** done locally by Chad; recent runs are now clickable and the selected run is highlighted.
-
-### 3. Backtest: add `signal_action` filter to the cases table
-The `BacktestCase.signal_action` field (`ACT` / `ABSTAIN` / `CANDIDATE` / `REJECT_*`) is now populated. On the backtests page, add a filter row or column so users can isolate "missed opportunities" (non-ACT cases) vs "trades we made" (ACT cases). This is the core research view.
-
-**Status:** done locally by Chad; the cases table now has an action column plus filter chips per selected run.
-
-### 4. Check Gamma `end_date_min` / `end_date_max` param names
-The near-resolution market sweep (`_fetch_near_resolution_markets` in `sync_markets.py`) passes `end_date_min` and `end_date_max` to the Gamma `/markets` endpoint. These are guesses at the param names — confirm they're correct by checking a live response or the Gamma API docs. If they're wrong, the sweep silently returns nothing (it catches errors). Fix the param names if needed.
-
-**Status:** confirmed from Polymarket Gamma docs: `end_date_min` and `end_date_max` are valid `/markets` query parameters.
-
-### 5. CHAD_SPRINT.md — mark completed items
-Several items in `CHAD_SPRINT.md` are done but not marked. Do a pass and check off what's shipped.
-
-**Status:** in progress; Chad is updating it alongside this sprint chunk.
-
----
-
-## Quickstart
-
-1. Create a virtualenv and install deps:
+## Quickstart (local — one command)
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+bash start.sh
+```
+
+That's it. `start.sh` creates a `.venv`, installs all deps, creates `app/static/`, copies `.env.example → .env` if missing, and starts the server. Open **http://localhost:8000**.
+
+To keep your Mac awake overnight:
+
+```bash
+caffeinate -i bash start.sh
+```
+
+### Manual setup
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-2. Add `.env` in the project root with your OpenAI key (recommended for interpretation + verification):
-
-```bash
-echo 'OPENAI_API_KEY=sk-...' >> .env
-```
-
-3. Run (hands-off defaults are in `app/settings.py`; override with env vars if needed):
-
-```bash
+cp .env.example .env   # then add OPENAI_API_KEY
 make run
 ```
 
-Or development with reload:
+### Hands-off defaults
 
-```bash
-make run-dev
-```
-
-Open `http://127.0.0.1:8000` (or your host’s IP if you used `make run`).
-
-### Hands-off defaults (token-light, “something in a few hours”)
-
-These background loops start automatically with the app unless an interval is set to `0` (as in `tests/conftest.py`):
+Background loops start automatically unless an interval is set to `0`:
 
 | Setting | Default | Role |
 |--------|---------|------|
-| `SNAPSHOT_INTERVAL_SECONDS` | **120** | Full market sync cadence (seconds). |
-| `BACKGROUND_POLL_NEWS_INTERVAL_SECONDS` | **600** | RSS poll every **10 minutes**. |
-| `BACKGROUND_PROCESS_CANDIDATES_INTERVAL_SECONDS` | **540** | Match + LLM pipeline every **9 minutes**. |
-| `BACKGROUND_LAG_PIPELINE_INTERVAL_SECONDS` | **3600** | Lag backfill + signal metrics + lag ranks hourly. |
-| `BACKGROUND_SETTLE_INTERVAL_SECONDS` | **3600** | Paper settlement pass hourly. |
-| `LLM_MAX_CONCURRENCY` | **2** | Caps parallel OpenAI calls per candidate batch. |
+| `SNAPSHOT_INTERVAL_SECONDS` | **120** | Full market sync cadence |
+| `BACKGROUND_POLL_NEWS_INTERVAL_SECONDS` | **600** | RSS poll every 10 minutes |
+| `BACKGROUND_PROCESS_CANDIDATES_INTERVAL_SECONDS` | **540** | Match + LLM pipeline every 9 minutes |
+| `BACKGROUND_LAG_PIPELINE_INTERVAL_SECONDS` | **3600** | Lag backfill + signal metrics hourly |
+| `BACKGROUND_SETTLE_INTERVAL_SECONDS` | **3600** | Paper settlement pass hourly |
+| `LLM_MAX_CONCURRENCY` | **2** | Parallel OpenAI calls per batch |
 
-Example overrides:
-
-```bash
-export BACKGROUND_PROCESS_CANDIDATES_INTERVAL_SECONDS=900
-make run
-```
-
-Watch **System status** on `/` and use **Settings → threshold profile** if you want more ACTs (e.g. `balanced` / `aggressive`).
-
-### Realtime paper (overnight / hands-off)
-
-For **faster** news → candidate → paper cycles without hand-tuning every env var, use either:
+### Realtime paper (overnight)
 
 ```bash
 make run-realtime
+# or: REALTIME_PAPER_QUICKSTART=1 in .env
 ```
 
-or in `.env`:
-
-```bash
-REALTIME_PAPER_QUICKSTART=1
-```
-
-That **caps** RSS poll (≤120s), candidate processing (≤60s), full Gamma snapshot (≤60s), and tightens adaptive floors when you hold **open** paper near resolution (`app/realtime_policy.py`). It uses more Polymarket + OpenAI quota than the defaults.
+Caps RSS poll (≤120s), candidate processing (≤60s), snapshot interval (≤60s), and tightens adaptive floors near resolution. Uses more API quota.
 
 ### Environment reference
 
 | Variable | Meaning |
 |----------|---------|
-| `PAPER_TRADE_NOTIONAL_USD` | Target **$** notional per simulated trade (default **10**). |
-| `POLYMARKET_ENTRY_FEE_RATE` | Taker-style fee on that notional at open (default **0.003** = 0.3%). |
-| `POLYMARKET_WINNING_PROFIT_FEE_RATE` | Fee on **positive** settlement PnL (default **0.02** = 2%). |
-| `DATABASE_URL` | Default `sqlite+aiosqlite:///./data.db` (project dir). |
-| `CRON_SECRET` | Bearer token for Vercel cron and operator-only POST endpoints. Required in Vercel; optional for local dev. |
-| `OPENAI_API_KEY` | Optional but required for interpret/verify; without it, candidates stall at LLM steps. |
-| `REALTIME_PAPER_QUICKSTART` | `1` = faster cadence (see above). |
-| `BACKGROUND_*_INTERVAL_SECONDS` | `0` disables that background loop; see `.env.example`. |
-| `LLM_MAX_CONCURRENCY` | Parallel candidate workers; set `1` if you see `database is locked`. |
-| `MAX_LLM_CALLS_PER_RUN` | Hard cap on GPT relevance-screen calls per candidate run (default **50**). |
-| `SYNC_CLOB_SNAPSHOT_LIMIT` | Max CLOB orderbook probes per full market sync (default **50**) so Sync markets stays bounded. |
-| `CLOB_ORDERBOOK_TIMEOUT_SECONDS` | Per-orderbook timeout during snapshot sync (default **5s**). |
-| `TRADING_ENABLED` | Must stay `false` for this MVP (paper only). |
-| `DASHBOARD_SSE_ENABLED` | Live dashboard counts via `/api/stream/dashboard`. |
+| `DATABASE_URL` | Default `sqlite+aiosqlite:///./data.db`. Set to Vercel Postgres URL in production. |
+| `OPENAI_API_KEY` | Required for interpret/verify; without it candidates stall at LLM steps. |
+| `CRON_SECRET` | Bearer token protecting `/api/cron/*` and settings mutation endpoints. Required on Vercel; optional locally. |
+| `DASHBOARD_SSE_ENABLED` | Set `false` on Vercel (serverless can't hold open connections). |
+| `PAPER_TRADE_NOTIONAL_USD` | Target notional per simulated trade (default **$10**). |
+| `POLYMARKET_ENTRY_FEE_RATE` | Taker-style fee at open (default **0.003** = 0.3%). |
+| `POLYMARKET_WINNING_PROFIT_FEE_RATE` | Fee on positive settlement P&L (default **0.02** = 2%). |
+| `REALTIME_PAPER_QUICKSTART` | `1` = faster cadence. |
+| `LLM_MAX_CONCURRENCY` | Set `1` if you see `database is locked`. |
+| `MAX_LLM_CALLS_PER_RUN` | Hard cap on GPT relevance-screen calls per run (default **50**). |
+| `TRADING_ENABLED` | Must stay `false` — paper only. |
 
-Copy `.env.example` → `.env` and edit; never commit `.env` (gitignored).
+Copy `.env.example` → `.env` and edit. Never commit `.env` (gitignored).
 
-### SQLite backup / restore
+---
 
-The app uses a single file DB when `DATABASE_URL` points at `.../data.db`. To snapshot while stopped:
+## Pages
 
-```bash
-cp data.db "backup-$(date +%Y%m%d%H%M).db"
-```
-
-Restore: stop the app, replace `data.db`, start again.
-
-### First hour checklist
-
-1. `make run` or `make run-realtime`.
-2. `curl -s http://127.0.0.1:8000/healthz`
-3. Open `/` — confirm **System status** rows appear; use top nav **Sync markets** / **Poll news** once if all red on a cold DB.
-4. Within one news + candidate cycle, **articles** and **signals** counts should move; **paper trades** only after an `ACT` + gates pass.
-5. Optional: `curl -s http://127.0.0.1:8000/api/export/summary` for a JSON paste of counts + job freshness.
-
-### Long soak (4–24h) protocol
-
-- **Watch:** `/` System status (green/yellow/red), disk use for `data.db*`, terminal logs.
-- **Expect:** hourly lag pipeline + settlement ticks; first lag rows may stay red until enough signals exist.
-- **Restart if:** runaway memory (rare); unrecoverable HTTP failures; or SQLite lock storms after lowering `LLM_MAX_CONCURRENCY`.
-- **Known incident (SQLite):** under parallel LLM + single-writer SQLite, you may see `database is locked`. Mitigation: `LLM_MAX_CONCURRENCY=1`, restart, and avoid firing multiple heavy jobs manually at once.
-
-### Reverse proxy + SSE
-
-For `/api/stream/dashboard`, disable response buffering and allow long-lived connections, e.g. **nginx:**
-
-```nginx
-location /api/stream/dashboard {
-    proxy_pass http://127.0.0.1:8000;
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-    proxy_buffering off;
-    proxy_read_timeout 3600s;
-}
-```
-
-### Next steps to go “live” on one machine
-
-1. **Use a stable working tree** — `git clone https://github.com/skynet-watcher/Polymarket-News-Reaction.git` (or `git pull` if you already have it) so `main` matches the team remote.
-2. **Create `.env`** with at least `OPENAI_API_KEY` (you already have one) and optionally `DATABASE_URL` if you don’t want `./data.db` in the project directory.
-3. **Start once with `make run`** — confirm `http://127.0.0.1:8000/healthz` returns `{"ok":"true"}`.
-4. **Open `/`** — within **~10–15 minutes** (or **~2–5 minutes** with `REALTIME_PAPER_QUICKSTART=1` / `make run-realtime`) you should see news polling and candidate processing advance in **System status** (green/yellow/red). If everything is red with no data, click **Sync markets** / **Poll news** once from the header or POST the job URLs (see Jobs below).
-5. **Leave it running** — over **1–3 hours**, expect new **articles**, **signals**, and occasional **paper trades** if the LLM + gates pass (use a looser threshold profile to see more activity).
-6. **Lag / ranks** — first hourly lag pipeline run may still show red until backfill produces rows; that’s normal on a fresh DB.
-7. **If SQLite locks** — set `LLM_MAX_CONCURRENCY=1` in the environment and restart.
-8. **Exposing beyond localhost** — put TLS + reverse proxy in front; for SSE (`/api/stream/dashboard`), disable buffering on that route (e.g. nginx `proxy_buffering off`).
+| URL | What you see |
+|-----|-------------|
+| `/` | Dashboard — counts, system status, recent signals |
+| `/health` | System Health — traffic-light gates, smoke test buttons |
+| `/markets` | Active Polymarket markets in the DB |
+| `/news` | Fetched articles |
+| `/signals` | Generated signals with rejection reasons |
+| `/trades` | Paper trades with live P&L |
+| `/analysis` | Lag analysis overview |
+| `/analysis/backtests` | News reaction backtest runs |
+| `/analysis/lags` | Per-signal lag measurements |
+| `/analysis/laggy-markets` | Markets ranked by lag score |
+| `/analysis/soft-accuracy` | Signal accuracy by source tier |
+| `/analysis/crypto-preflight` | ⚡ Crypto Market Preflight Scanner |
+| `/settings` | Threshold profiles, RSS sources, resolution mappings |
 
 ---
 
 ## Jobs
 
-- `POST /api/jobs/sync_markets`
-- `POST /api/jobs/poll_news`
-- `POST /api/jobs/process_candidates`
-- `POST /api/jobs/settle_trades`
-- `POST /api/jobs/backtest_news_reactions?since_hours=72&max_articles=50&min_snapshot_coverage=3`
-- `POST /api/lag-measurements/backfill` (returns immediately; job runs in the **background** — watch System status)
-- `GET /api/export/summary` — JSON snapshot (counts + system status rows) for logs or chat paste
+All jobs are idempotent and callable via the buttons in the UI or directly:
 
-All jobs are designed to be **idempotent**.
+| Endpoint | What it does |
+|----------|-------------|
+| `POST /api/jobs/sync_markets` | Sync markets + price snapshots from Gamma/CLOB |
+| `POST /api/jobs/poll_news` | Fetch RSS feeds |
+| `POST /api/jobs/process_candidates` | Match articles to markets, LLM interpret+verify |
+| `POST /api/jobs/settle_trades` | Settle open paper trades |
+| `POST /api/jobs/backtest_news_reactions` | Replay news signals against stored snapshots |
+| `POST /api/jobs/bulk_smoke_test?count=20` | Place N test paper trades across N markets |
+| `POST /api/jobs/btc_signal_test?force=true` | Single BTC price-move paper trade (pipeline test) |
+| `POST /api/jobs/crypto_preflight` | Run Crypto Market Preflight Scanner |
+| `POST /api/lag-measurements/backfill` | Backfill lag measurements (runs in background) |
+| `GET /api/export/summary` | JSON snapshot of counts + system status |
 
-When `CRON_SECRET` is set, all `POST` job endpoints require:
+Browser buttons send no `Authorization` header and work without any secret. The cron endpoints (`GET /api/cron/*`) require `Authorization: Bearer $CRON_SECRET` when `CRON_SECRET` is set.
+
+### Cron endpoints (Vercel / cron-job.org)
+
+| Endpoint | What it does |
+|----------|-------------|
+| `GET /api/cron/pipeline` | sync → poll → process → settle (full daily run) |
+| `GET /api/cron/settle` | Settlement pass only |
+| `GET /api/cron/sync` | Market sync only (safe to call every few minutes) |
+| `GET /api/cron/poll` | Poll news + process candidates |
+
+---
+
+## Vercel deployment
+
+See [`.env.vercel.example`](.env.vercel.example) for the full environment variable reference.
+
+**Deploy steps:**
+1. [vercel.com](https://vercel.com) → New Project → import this repo
+2. Storage → Create Database → Postgres → Connect to Project
+3. Settings → Environment Variables: add `OPENAI_API_KEY`, `CRON_SECRET`, `DASHBOARD_SSE_ENABLED=false`
+4. Redeploy
+
+**Hobby plan cron schedule** (2 jobs/day max):
+- 8:00 AM UTC — full pipeline (`/api/cron/pipeline`)
+- 8:00 PM UTC — settlement pass (`/api/cron/settle`)
+
+**For more frequent runs:** use [cron-job.org](https://cron-job.org) (free) with a custom `Authorization: Bearer <CRON_SECRET>` header pointing at `/api/cron/poll` every 15–30 minutes.
+
+**10-second timeout:** Vercel Hobby functions time out at 10s. Short jobs (sync, settle, poll) fit. `process_candidates` with LLM calls may timeout under heavy load — use the Hobby plan for read-heavy dashboarding and trigger heavy jobs manually or via an external cron service.
+
+---
+
+## Backtesting
+
+`POST /api/jobs/backtest_news_reactions?since_hours=72&max_articles=50&min_snapshot_coverage=3`
+
+Replays stored news signals against local price snapshots. Measures:
+- News polling delay, signal delay, hours to resolution
+- `p0` near publication, price moves at 1m/5m/15m/30m/1h/4h/24h
+- First +5pt / +10pt threshold crossing
+- Whether the signal fired before the market moved
+
+Results in the `BacktestRun` / `BacktestCase` tables and at `/analysis/backtests`. Local runs also write `logs/backtests/backtest_<run_id>.jsonl` (gitignored). JSONL mirroring is disabled on Vercel.
+
+---
+
+## SQLite backup / restore
 
 ```bash
-Authorization: Bearer $CRON_SECRET
+cp data.db "backup-$(date +%Y%m%d%H%M).db"
 ```
 
-Vercel cron sends this header automatically for `/api/cron/*`. Manual curl examples must include it in production:
+Restore: stop the app, replace `data.db`, restart.
 
-```bash
-curl -s -X POST -H "Authorization: Bearer $CRON_SECRET" \
-  https://your-app.vercel.app/api/jobs/sync_markets
-```
+---
 
-### Backtesting news reactions
+## First-hour checklist
 
-Use **Analysis → Backtests** or `POST /api/jobs/backtest_news_reactions` to measure how quickly markets moved after article publication using only locally stored `price_snapshots`.
+1. `bash start.sh` (or `make run`)
+2. `curl -s http://localhost:8000/healthz` → `{"ok":"true"}`
+3. Open `/health` — System Health gates should all go green within one cycle
+4. Within 10–15 minutes: articles and signals counts should move in System status
+5. Paper trades appear after the first `ACT` signal clears all gates
+6. Use **System Health → Smoke Tests** to place test trades instantly if you want to verify the pipeline right now
 
-Phase 1 logs:
+---
 
-- news polling delay: `NewsArticle.fetched_at - NewsArticle.published_at`
-- signal delay: `NewsSignal.created_at - NewsArticle.published_at`
-- hours to resolution: `Market.end_date - NewsArticle.published_at`
-- p0 near publication
-- fixed post-publication windows: 1m, 5m, 15m, 30m, 1h, 4h, 24h
-- first +5pt / +10pt move
-- max 24h move
-- whether the first +5pt move happened before the article was fetched
-- coverage status: `GOOD`, `SPARSE`, or `NO_DATA`
+## Known issues / gotchas
 
-Every run writes queryable DB rows and mirrors structured audit events to:
-
-```text
-logs/backtests/backtest_<run_id>.jsonl
-```
-
-The JSONL logs are local runtime artifacts and are ignored by Git.
-
-On Vercel, JSONL mirroring is disabled because function filesystems are not persistent. Use the `backtest_event_logs` table as the canonical audit source in production.
-
-### Upgrade note: source tiers
-
-This MVP does not ship Alembic migrations. Existing `news_sources.source_tier` / `news_articles.source_tier` rows may still contain older tier labels after upgrading.
-
-**Operators should re-save sources in Settings** (or update rows manually) so tiers align with the current scheme: `SOFT`, `HARD`, `RESOLUTION_SOURCE`.
+- **SQLite locks under parallel LLM:** set `LLM_MAX_CONCURRENCY=1` and restart
+- **Old `data.db` with null `token_ids_json`:** trigger **Sync markets** once — the merge pass will backfill token IDs and price snapshots will start flowing
+- **Port 8000 already in use:** `pkill -9 -f uvicorn` then restart
+- **Vercel 10s timeout:** heavy jobs (process_candidates with many LLM calls, crypto preflight scan) may timeout on Hobby — run them manually from the browser or upgrade to Pro for 60s functions
