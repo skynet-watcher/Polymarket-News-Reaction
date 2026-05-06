@@ -20,14 +20,23 @@ from app.models import NewsSource
 DEPRECATED_SOURCE_DOMAINS: FrozenSet[str] = frozenset({"reuters.com"})
 
 DEFAULT_LIVE_FEEDS: List[Dict[str, Any]] = [
-    {"name": "The Guardian — World", "domain": "theguardian.com", "rss_url": "https://www.theguardian.com/world/rss", "source_tier": "SOFT"},
-    {"name": "BBC News — UK", "domain": "bbc.co.uk", "rss_url": "https://feeds.bbci.co.uk/news/rss.xml", "source_tier": "SOFT"},
-    # World feed often uses www.bbc.com article URLs; separate row so domain guard matches.
-    {"name": "BBC News — World (bbc.com)", "domain": "bbc.com", "rss_url": "https://feeds.bbci.co.uk/news/world/rss.xml", "source_tier": "SOFT"},
-    {"name": "NPR — News", "domain": "npr.org", "rss_url": "https://feeds.npr.org/1001/rss.xml", "source_tier": "SOFT"},
-    {"name": "Axios — Top stories", "domain": "axios.com", "rss_url": "https://api.axios.com/feed/", "source_tier": "SOFT"},
-    {"name": "Politico — Politics", "domain": "politico.com", "rss_url": "https://rss.politico.com/politics-news.xml", "source_tier": "SOFT"},
-    {"name": "Al Jazeera — All", "domain": "aljazeera.com", "rss_url": "https://www.aljazeera.com/xml/rss/all.xml", "source_tier": "SOFT"},
+    # General / politics — strong Polymarket overlap
+    {"name": "AP — Top News",       "domain": "apnews.com",       "rss_url": "https://feeds.apnews.com/rss/topnews",                           "source_tier": "HARD"},
+    {"name": "The Hill",            "domain": "thehill.com",      "rss_url": "https://thehill.com/feed/",                                      "source_tier": "SOFT"},
+    {"name": "Politico — Politics", "domain": "politico.com",     "rss_url": "https://rss.politico.com/politics-news.xml",                     "source_tier": "SOFT"},
+    {"name": "Axios — Top stories", "domain": "axios.com",        "rss_url": "https://api.axios.com/feed/",                                    "source_tier": "SOFT"},
+    {"name": "The Guardian — World","domain": "theguardian.com",  "rss_url": "https://www.theguardian.com/world/rss",                          "source_tier": "SOFT"},
+    {"name": "NPR — News",          "domain": "npr.org",          "rss_url": "https://feeds.npr.org/1001/rss.xml",                             "source_tier": "SOFT"},
+    {"name": "Al Jazeera — All",    "domain": "aljazeera.com",    "rss_url": "https://www.aljazeera.com/xml/rss/all.xml",                      "source_tier": "SOFT"},
+    # BBC — two domain rows because article URLs split across bbc.co.uk and bbc.com
+    {"name": "BBC News — UK",       "domain": "bbc.co.uk",        "rss_url": "https://feeds.bbci.co.uk/news/rss.xml",                          "source_tier": "SOFT"},
+    {"name": "BBC News — World",    "domain": "bbc.com",          "rss_url": "https://feeds.bbci.co.uk/news/world/rss.xml",                    "source_tier": "SOFT"},
+    # Finance / crypto — high Polymarket volume category
+    {"name": "CNBC — Top News",     "domain": "cnbc.com",         "rss_url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",          "source_tier": "SOFT"},
+    {"name": "CoinDesk",            "domain": "coindesk.com",     "rss_url": "https://www.coindesk.com/arc/outboundfeeds/rss/",                "source_tier": "SOFT"},
+    {"name": "CryptoSlate",         "domain": "cryptoslate.com",  "rss_url": "https://cryptoslate.com/feed/",                                  "source_tier": "SOFT"},
+    # Sports
+    {"name": "ESPN — Headlines",    "domain": "espn.com",         "rss_url": "https://www.espn.com/espn/rss/news",                             "source_tier": "SOFT"},
 ]
 # fmt: on
 

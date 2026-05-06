@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.job_status import run_tracked_job
-from app.jobs import poll_news, process_candidates, settle_trades, sync_markets
+from app.jobs import compute_lag, lag_rank, poll_news, process_candidates, settle_trades, signal_metrics, sync_markets
 from app.security import verify_bearer_secret
 
 logger = logging.getLogger(__name__)
@@ -90,5 +90,27 @@ async def cron_poll(
         except Exception as exc:
             await session.rollback()
             logger.exception("cron_poll: %s failed", name)
+            results[name] = {"ok": False, "error": str(exc)}
+    return JSONResponse({"ok": True, "steps": results})
+
+
+@router.get("/cron/lag-pipeline")
+async def cron_lag_pipeline(
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(verify_bearer_secret),
+) -> JSONResponse:
+    """Daily lag analytics: backfill lag measurements → signal metrics → lag ranks."""
+    results: dict[str, object] = {}
+    for name, fn in [
+        ("lag_backfill", lambda s=session: compute_lag.run_backfill(s)),
+        ("signal_metrics", lambda s=session: signal_metrics.run_backfill(s, limit=200)),
+        ("lag_ranks", lambda s=session: lag_rank.run(s)),
+    ]:
+        try:
+            out = await run_tracked_job(session, name, fn)
+            results[name] = {"ok": out.get("ok", True)}
+        except Exception as exc:
+            await session.rollback()
+            logger.exception("cron_lag_pipeline: %s failed", name)
             results[name] = {"ok": False, "error": str(exc)}
     return JSONResponse({"ok": True, "steps": results})

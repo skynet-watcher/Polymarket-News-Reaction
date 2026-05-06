@@ -15,36 +15,41 @@
           </a>
           <div class="text-xs text-slate-400">Paper trading only • Whitelisted sources only • High-confidence or abstain</div>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <form class="js-async-job" method="post" action="/api/jobs/sync_markets" data-job-label="Sync markets" data-done-url="/markets">
-            <button type="submit" class="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm">Sync markets</button>
-          </form>
-          <form class="js-async-job" method="post" action="/api/jobs/poll_news" data-job-label="Poll news" data-done-url="/news">
-            <button type="submit" class="px-3 py-2 rounded bg-sky-600 hover:bg-sky-500 text-sm">Poll news</button>
-          </form>
-          <form class="js-async-job" method="post" action="/api/jobs/process_candidates" data-job-label="Process candidates" data-done-url="/signals">
-            <button type="submit" class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm">Process candidates</button>
-          </form>
-          <form
-            class="js-async-job"
-            method="post"
-            action="/api/lag-measurements/backfill"
-            data-job-label="Backfill lags"
-            data-done-url="/analysis/lags"
-            data-async-background="true"
-          >
-            <button type="submit" class="px-3 py-2 rounded bg-fuchsia-600 hover:bg-fuchsia-500 text-sm">Backfill lags</button>
-          </form>
-          <form class="js-async-job" method="post" action="/api/jobs/compute_signal_metrics" data-job-label="Signal metrics" data-done-url="/analysis">
-            <button type="submit" class="px-3 py-2 rounded bg-cyan-700 hover:bg-cyan-600 text-sm">Signal metrics</button>
-          </form>
-          <form class="js-async-job" method="post" action="/api/jobs/compute_lag_ranks" data-job-label="Lag ranks" data-done-url="/analysis/laggy-markets">
-            <button type="submit" class="px-3 py-2 rounded bg-violet-700 hover:bg-violet-600 text-sm">Lag ranks</button>
-          </form>
-          <form class="js-async-job" method="post" action="/api/jobs/settle_trades" data-job-label="Settle trades" data-done-url="/trades">
-            <button type="submit" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Settle trades</button>
-          </form>
-        </div>
+        <details class="group">
+          <summary class="cursor-pointer px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 text-sm text-slate-400 select-none list-none">
+            Dev tools ▾
+          </summary>
+          <div class="absolute right-4 z-50 mt-1 flex flex-wrap gap-2 rounded border border-slate-700 bg-slate-900 p-3 shadow-xl">
+            <form class="js-async-job" method="post" action="/api/jobs/sync_markets" data-job-label="Sync markets" data-done-url="/markets">
+              <button type="submit" class="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm">Sync markets</button>
+            </form>
+            <form class="js-async-job" method="post" action="/api/jobs/poll_news" data-job-label="Poll news" data-done-url="/news">
+              <button type="submit" class="px-3 py-2 rounded bg-sky-600 hover:bg-sky-500 text-sm">Poll news</button>
+            </form>
+            <form class="js-async-job" method="post" action="/api/jobs/process_candidates" data-job-label="Process candidates" data-done-url="/signals">
+              <button type="submit" class="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm">Process candidates</button>
+            </form>
+            <form
+              class="js-async-job"
+              method="post"
+              action="/api/lag-measurements/backfill"
+              data-job-label="Backfill lags"
+              data-done-url="/analysis/lags"
+              data-async-background="true"
+            >
+              <button type="submit" class="px-3 py-2 rounded bg-fuchsia-600 hover:bg-fuchsia-500 text-sm">Backfill lags</button>
+            </form>
+            <form class="js-async-job" method="post" action="/api/jobs/compute_signal_metrics" data-job-label="Signal metrics" data-done-url="/analysis">
+              <button type="submit" class="px-3 py-2 rounded bg-cyan-700 hover:bg-cyan-600 text-sm">Signal metrics</button>
+            </form>
+            <form class="js-async-job" method="post" action="/api/jobs/compute_lag_ranks" data-job-label="Lag ranks" data-done-url="/analysis/laggy-markets">
+              <button type="submit" class="px-3 py-2 rounded bg-violet-700 hover:bg-violet-600 text-sm">Lag ranks</button>
+            </form>
+            <form class="js-async-job" method="post" action="/api/jobs/settle_trades" data-job-label="Settle trades" data-done-url="/trades">
+              <button type="submit" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Settle trades</button>
+            </form>
+          </div>
+        </details>
       </div>
 
       <p class="text-xs text-slate-500 mb-4 max-w-4xl leading-relaxed">

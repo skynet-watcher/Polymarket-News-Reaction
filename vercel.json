@@ -12,7 +12,10 @@
     { "src": "/(.*)", "dest": "api/index.py" }
   ],
   "crons": [
-    { "path": "/api/cron/pipeline", "schedule": "0 8 * * *" },
-    { "path": "/api/cron/settle",   "schedule": "0 20 * * *" }
+    { "path": "/api/cron/sync",         "schedule": "* * * * *"    },
+    { "path": "/api/cron/poll",         "schedule": "* * * * *"    },
+    { "path": "/api/cron/settle",       "schedule": "*/5 * * * *"  },
+    { "path": "/api/cron/lag-pipeline", "schedule": "0 6 * * *"    },
+    { "path": "/api/cron/pipeline",     "schedule": "0 4 * * *"    }
   ]
 }
