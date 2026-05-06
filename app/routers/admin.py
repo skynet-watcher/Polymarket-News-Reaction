@@ -21,6 +21,7 @@ from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
+from app.live_feeds import ensure_live_news_sources
 from app.models import (
     BacktestCase,
     BacktestEventLog,
@@ -113,6 +114,11 @@ async def admin_reset(
         counts = {t: -1 for t in _full_tables}  # TRUNCATE doesn't return row counts
 
     await session.commit()
+
+    # Re-seed news sources immediately so polls don't silently no-op after a full reset.
+    if scope == "full":
+        seed = await ensure_live_news_sources(session)
+        counts["_seeded_sources"] = seed.get("added", 0)
 
     logger.info("admin_reset scope=%s deleted=%s", scope, counts)
     return JSONResponse({"ok": True, "scope": scope, "deleted": counts})
