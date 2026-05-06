@@ -17,7 +17,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete
+from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
@@ -86,10 +86,31 @@ async def admin_reset(
             counts[model.__tablename__] = result.rowcount  # type: ignore[attr-defined]
 
     # ── markets + sources (full only) ─────────────────────────────────────
+    # Use TRUNCATE CASCADE rather than sequential DELETEs.  Cron jobs run every
+    # minute and can insert new price_snapshots between our DELETE price_snapshots
+    # and DELETE markets (both within the same transaction), causing a FK violation.
+    # TRUNCATE CASCADE is a single atomic operation that handles FK order for us.
     if scope == "full":
-        for model in (ResolutionSourceMapping, Market, NewsSource):
-            result = await session.execute(delete(model))
-            counts[model.__tablename__] = result.rowcount  # type: ignore[attr-defined]
+        _full_tables = (
+            "lag_score_snapshots",
+            "lag_threshold_crossings",
+            "signal_drift_windows",
+            "backtest_event_logs",
+            "backtest_cases",
+            "backtest_runs",
+            "signal_metrics",
+            "market_lag_scores",
+            "lag_measurements",
+            "paper_trades",
+            "news_signals",
+            "price_snapshots",
+            "news_articles",
+            "resolution_source_mappings",
+            "markets",
+            "news_sources",
+        )
+        await session.execute(text(f"TRUNCATE {', '.join(_full_tables)} RESTART IDENTITY CASCADE"))
+        counts = {t: -1 for t in _full_tables}  # TRUNCATE doesn't return row counts
 
     await session.commit()
 
