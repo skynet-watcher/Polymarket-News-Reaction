@@ -32,36 +32,20 @@ import datetime as dt
 import logging
 from typing import Any, Optional
 
-import httpx
 from sqlalchemy import and_, desc, select
 
 from app.db import SessionLocal
 from app.models import Market, NewsArticle, NewsSignal, NewsSource, PaperTrade, PriceSnapshot, RuntimeSetting
 from app.core.paper import maybe_paper_trade
+from app.jobs.btc_price import fetch_btc_usd_price
 from app.settings import settings
 from app.util import new_id, now_utc
 
 logger = logging.getLogger(__name__)
 
-_BINANCE_URL = "https://api.binance.com/api/v3/ticker/bookTicker"
 _SYMBOL = "BTCUSDT"
 _REF_PRICE_KEY = "btc_test_ref_price"
 _REF_AT_KEY = "btc_test_ref_at"
-
-
-async def _fetch_btc_mid() -> Optional[float]:
-    """Return current BTCUSDT mid-price from Binance, or None on any error."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(_BINANCE_URL, params={"symbol": _SYMBOL})
-            r.raise_for_status()
-            d = r.json()
-            bid = float(d["bidPrice"])
-            ask = float(d["askPrice"])
-            return (bid + ask) / 2.0
-    except Exception:
-        logger.exception("btc_signal_test: failed to fetch Binance price")
-        return None
 
 
 async def run(
@@ -82,9 +66,9 @@ async def run(
     """
     async with SessionLocal() as session:
         # ── 1. Fetch current price ────────────────────────────────────────────
-        current_price = await _fetch_btc_mid()
+        current_price, price_provider = await fetch_btc_usd_price()
         if current_price is None:
-            return {"ok": False, "reason": "binance_fetch_failed", "trade_created": False}
+            return {"ok": False, "reason": "btc_price_fetch_failed", "trade_created": False}
 
         now = now_utc()
 
@@ -121,6 +105,7 @@ async def run(
                 "ok": True,
                 "reason": "first_run_reference_saved",
                 "current_price": current_price,
+                "price_provider": price_provider,
                 "trade_created": False,
             }
 
@@ -149,6 +134,7 @@ async def run(
                 "ok": True,
                 "reason": "move_below_threshold",
                 "current_price": current_price,
+                "price_provider": price_provider,
                 "ref_price": ref_price,
                 "pct_move": round(pct_move, 4),
                 "direction": direction,
@@ -269,6 +255,7 @@ async def run(
             raw_interpretation={
                 "source": "binance_smoke_test",
                 "symbol": _SYMBOL,
+                "price_provider": price_provider,
                 "ref_price": ref_price,
                 "current_price": current_price,
                 "pct_move": round(pct_move, 4),
@@ -344,6 +331,7 @@ async def run(
             "outcome": outcome,
             "pct_move": round(pct_move, 4),
             "current_price": current_price,
+            "price_provider": price_provider,
             "ref_price": ref_price,
         }
 

@@ -30,7 +30,6 @@ import datetime as dt
 import logging
 from typing import Any, Optional
 
-import httpx
 from sqlalchemy import and_, asc, desc, select
 
 from app.db import SessionLocal
@@ -44,25 +43,13 @@ from app.models import (
     RuntimeSetting,
 )
 from app.core.paper import maybe_paper_trade
+from app.jobs.btc_price import fetch_btc_usd_price
 from app.settings import settings
 from app.util import new_id, now_utc
 
 logger = logging.getLogger(__name__)
 
-_BINANCE_URL = "https://api.binance.com/api/v3/ticker/bookTicker"
 _SYMBOL = "BTCUSDT"
-
-
-async def _fetch_btc_price() -> Optional[float]:
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.get(_BINANCE_URL, params={"symbol": _SYMBOL})
-            r.raise_for_status()
-            d = r.json()
-            return (float(d["bidPrice"]) + float(d["askPrice"])) / 2.0
-    except Exception:
-        logger.warning("bulk_smoke_test: Binance fetch failed; BTC context unavailable")
-        return None
 
 
 def _pick_direction(market: Market, latest_snap: Optional[PriceSnapshot]) -> str:
@@ -105,8 +92,12 @@ async def run(*, count: int = 20) -> dict[str, Any]:
 
     async with SessionLocal() as session:
         # ── Fetch BTC price for context note ─────────────────────────────────
-        btc_price = await _fetch_btc_price()
-        btc_note = f"BTCUSDT ≈ ${btc_price:,.0f}" if btc_price else "BTC price unavailable"
+        btc_price, price_provider = await fetch_btc_usd_price()
+        btc_note = (
+            f"BTCUSD ≈ ${btc_price:,.0f} via {price_provider}"
+            if btc_price
+            else "BTC price unavailable"
+        )
 
         # ── Get a NewsSource to attach articles to ────────────────────────────
         source = (await session.execute(select(NewsSource).limit(1))).scalar_one_or_none()
@@ -229,6 +220,7 @@ async def run(*, count: int = 20) -> dict[str, Any]:
                 raw_interpretation={
                     "source": "bulk_smoke_test",
                     "btc_price": btc_price,
+                    "price_provider": price_provider,
                     "direction_basis": "mid_price",
                     "outcome": outcome,
                 },

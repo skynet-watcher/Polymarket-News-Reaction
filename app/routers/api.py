@@ -212,7 +212,7 @@ async def job_btc_signal_test(
         redirect = f"/health?smoke=no_move&smoke_detail=BTC+moved+only+{pct:.2f}%25"
     elif reason == "no_open_markets_in_db":
         redirect = "/health?smoke=no_markets"
-    elif reason == "binance_fetch_failed":
+    elif reason in {"binance_fetch_failed", "btc_price_fetch_failed"}:
         redirect = "/health?smoke=binance_error"
     else:
         redirect = "/health?smoke=error"
