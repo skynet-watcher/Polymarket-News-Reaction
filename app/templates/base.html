@@ -48,6 +48,16 @@
             <form class="js-async-job" method="post" action="/api/jobs/settle_trades" data-job-label="Settle trades" data-done-url="/trades">
               <button type="submit" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Settle trades</button>
             </form>
+            <div class="w-full border-t border-slate-700 my-1"></div>
+            <form class="js-reset-job" method="post" action="/api/admin/reset?scope=trades" data-confirm="Delete ALL paper trades? This cannot be undone." data-job-label="Reset trades" data-done-url="/trades">
+              <button type="submit" class="px-3 py-1 bg-rose-800 hover:bg-rose-700 rounded text-sm">Reset trades</button>
+            </form>
+            <form class="js-reset-job" method="post" action="/api/admin/reset?scope=pipeline" data-confirm="Delete trades, signals, articles, price snapshots, and all analytics? This cannot be undone." data-job-label="Reset pipeline" data-done-url="/">
+              <button type="submit" class="px-3 py-1 bg-rose-800 hover:bg-rose-700 rounded text-sm">Reset pipeline</button>
+            </form>
+            <form class="js-reset-job" method="post" action="/api/admin/reset?scope=full" data-confirm="FULL RESET: delete everything including markets and sources. The app will cold-start on next cron fire. This cannot be undone." data-job-label="Full reset" data-done-url="/">
+              <button type="submit" class="px-3 py-1 bg-red-700 hover:bg-red-600 rounded text-sm font-semibold">Full reset ⚠</button>
+            </form>
           </div>
         </details>
       </div>
@@ -155,6 +165,44 @@
               })
               .catch(function (err) {
                 showToast(label + " failed — " + err, true);
+              });
+          });
+        });
+      })();
+
+      (function () {
+        var toast = document.getElementById("job-toast");
+        document.querySelectorAll("form.js-reset-job").forEach(function (form) {
+          form.addEventListener("submit", function (e) {
+            e.preventDefault();
+            var msg = form.getAttribute("data-confirm") || "Are you sure?";
+            if (!window.confirm(msg)) return;
+            var label = form.getAttribute("data-job-label") || "Reset";
+            var doneUrl = form.getAttribute("data-done-url");
+            if (toast) {
+              toast.textContent = label + "… running";
+              toast.classList.remove("hidden");
+              toast.classList.remove("border-red-500");
+              toast.classList.add("border-slate-600");
+            }
+            fetch(form.action, {
+              method: "POST",
+              headers: { Accept: "application/json" },
+              credentials: "same-origin",
+            })
+              .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+              .then(function (res) {
+                if (!res.ok) {
+                  if (toast) { toast.textContent = label + " failed — " + JSON.stringify(res.data); toast.classList.add("border-red-500"); }
+                  return;
+                }
+                var deleted = res.data.deleted || {};
+                var summary = Object.keys(deleted).map(function (k) { return k + ": " + deleted[k]; }).join(" · ");
+                if (toast) { toast.textContent = label + " complete — " + (summary || "ok"); }
+                if (doneUrl) { setTimeout(function () { window.location.href = doneUrl; }, 1400); }
+              })
+              .catch(function (err) {
+                if (toast) { toast.textContent = label + " failed — " + err; toast.classList.add("border-red-500"); }
               });
           });
         });

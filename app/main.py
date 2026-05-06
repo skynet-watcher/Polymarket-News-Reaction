@@ -25,7 +25,7 @@ from app import background_loops
 from app.jobs import sync_markets, settle_trades, poll_news, process_candidates
 from app.realtime_policy import invested_hours_to_resolution, next_snapshot_tick_sleep_seconds
 from app.settings import settings
-from app.routers import api, crons, ui
+from app.routers import admin, api, crons, ui
 from app.util import format_lag_seconds
 
 logger = logging.getLogger(__name__)
@@ -259,6 +259,7 @@ async def healthz() -> dict[str, str]:
 
 app.include_router(api.router, prefix="/api")
 app.include_router(crons.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 app.include_router(ui.router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
