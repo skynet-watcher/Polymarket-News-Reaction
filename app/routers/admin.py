@@ -17,7 +17,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, text
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
@@ -39,7 +39,6 @@ from app.models import (
     SignalDriftWindow,
     SignalMetrics,
 )
-from app.security import verify_bearer_secret
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -51,7 +50,6 @@ VALID_SCOPES = {"trades", "pipeline", "full"}
 async def admin_reset(
     scope: str,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(verify_bearer_secret),
 ) -> JSONResponse:
     """
     Reset app data.  scope = trades | pipeline | full
