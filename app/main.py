@@ -227,6 +227,12 @@ async def _startup() -> None:
         asyncio.create_task(
             background_loops.run_lag_pipeline_loop(settings.background_lag_pipeline_interval_seconds)
         )
+    if settings.background_watchlist_monitor_interval_seconds > 0:
+        asyncio.create_task(
+            background_loops.run_watchlist_monitor_loop(
+                settings.background_watchlist_monitor_interval_seconds
+            )
+        )
 
 
 @app.get("/healthz")

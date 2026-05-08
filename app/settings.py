@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     background_process_candidates_interval_seconds: int = 540
     background_lag_pipeline_interval_seconds: int = 3600
     background_settle_interval_seconds: int = 3600
+    background_watchlist_monitor_interval_seconds: int = 600
 
     # T+24h paper settlement: require a post-signal snapshot not older than this many
     # seconds before the nominal settle time (avoids marking stale pre-news prices as T+24).

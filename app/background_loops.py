@@ -12,7 +12,7 @@ import logging
 
 from app.db import SessionLocal
 from app.job_status import run_tracked_job
-from app.jobs import compute_lag, lag_rank, poll_news, process_candidates, signal_metrics
+from app.jobs import compute_lag, lag_rank, poll_news, process_candidates, signal_metrics, watchlist_monitor
 from app.realtime_policy import invested_hours_to_resolution, next_poll_news_sleep_seconds, next_process_candidates_sleep_seconds
 
 logger = logging.getLogger(__name__)
@@ -80,3 +80,20 @@ async def run_lag_pipeline_loop(interval_seconds: int) -> None:
         except Exception:
             logger.exception("background lag pipeline failed")
         await asyncio.sleep(max(300, interval_seconds))
+
+
+async def run_watchlist_monitor_loop(interval_seconds: int, max_trades: int = 3) -> None:
+    """Run the overnight watchlist monitor on a fixed interval."""
+    await _sleep_stagger(60.0, 0.0)
+    while True:
+        try:
+            async with SessionLocal() as session:
+                out = await run_tracked_job(
+                    session,
+                    "watchlist_monitor",
+                    lambda: watchlist_monitor.run(session, max_trades=max_trades),
+                )
+                logger.info("background watchlist_monitor: %s", out)
+        except Exception:
+            logger.exception("background watchlist_monitor failed")
+        await asyncio.sleep(max(60, interval_seconds))

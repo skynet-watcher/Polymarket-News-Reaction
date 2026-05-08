@@ -602,6 +602,18 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
 
             winner_raw = rm.get("winner") or rm.get("resolved_outcome") or rm.get("resolvedOutcome")
             winning_outcome = _normalize_binary_winner(winner_raw)
+            # Gamma rarely populates winner/resolvedOutcome; infer from outcomePrices instead.
+            # outcomePrices: ["1","0"] → YES won; ["0","1"] → NO won.
+            if winning_outcome is None and bool(rm.get("closed")):
+                op = _jsonish_list(rm.get("outcomePrices"))
+                if op and len(op) >= 2:
+                    try:
+                        if float(op[0]) >= 0.99:
+                            winning_outcome = "YES"
+                        elif float(op[1]) >= 0.99:
+                            winning_outcome = "NO"
+                    except (TypeError, ValueError):
+                        pass
 
             existing = (await session.execute(select(Market).where(Market.id == market_id))).scalar_one_or_none()
             if existing is None:
