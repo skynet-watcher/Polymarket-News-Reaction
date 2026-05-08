@@ -14,6 +14,10 @@ from app.settings import settings
 logger = logging.getLogger(__name__)
 
 
+def _has_llm() -> bool:
+    return bool(settings.openai_api_key or settings.anthropic_api_key)
+
+
 async def batch_relevance_screen(
     article: NewsArticle,
     markets: list[Market],
@@ -26,24 +30,28 @@ async def batch_relevance_screen(
 
         {"market_id": str, "score": float, "reason": str}
 
-    Only called when an OpenAI key is configured AND the candidate list is
-    non-empty.  Falls back to returning all candidates with score=1.0 when the
-    LLM is unavailable, so the pipeline degrades gracefully.
+    Uses OpenAI when ``openai_api_key`` is configured, falls back to Anthropic
+    when ``anthropic_api_key`` is set, and degrades to passing all candidates
+    through with score=1.0 when neither key is available.
     """
     if not markets:
         return []
 
-    if not settings.openai_api_key:
+    if not _has_llm():
         # No LLM: pass all candidates through so keyword matches still work.
         return [{"market_id": m.id, "score": 1.0, "reason": "no-llm fallback"} for m in markets]
 
     batch_size = max(1, min(settings.matcher_llm_batch_size, 5) if os.environ.get("VERCEL") else settings.matcher_llm_batch_size)
     results: list[dict[str, Any]] = []
+    use_anthropic = not settings.openai_api_key and bool(settings.anthropic_api_key)
 
     for i in range(0, len(markets), batch_size):
         batch = markets[i : i + batch_size]
         try:
-            batch_results = await _llm_relevance_batch(article, batch)
+            if use_anthropic:
+                batch_results = await _anthropic_relevance_batch(article, batch)
+            else:
+                batch_results = await _llm_relevance_batch(article, batch)
             results.extend(batch_results)
         except Exception:
             logger.exception(
@@ -140,6 +148,188 @@ Return ONLY a JSON array — one object per market, in the same order:
     return out
 
 
+# ─── Anthropic helpers ───────────────────────────────────────────────────────
+
+async def _anthropic_request(prompt: str) -> str:
+    """Single Anthropic Messages API call; returns the text of the first content block."""
+    body = {
+        "model": settings.anthropic_model,
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    trust = settings.http_trust_env and not settings.http_disable_env_proxy
+    timeout = 20.0 if os.environ.get("VERCEL") else 60.0
+    async with httpx.AsyncClient(
+        base_url=settings.anthropic_base_url,
+        timeout=timeout,
+        trust_env=trust,
+    ) as client:
+        r = await client.post(
+            "/v1/messages",
+            headers={
+                "x-api-key": settings.anthropic_api_key or "",
+                "anthropic-version": "2023-06-01",
+            },
+            json=body,
+        )
+        r.raise_for_status()
+        data = r.json()
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                return block["text"]
+    return "{}"
+
+
+async def _anthropic_relevance_batch(
+    article: NewsArticle,
+    markets: list[Market],
+) -> list[dict[str, Any]]:
+    """Relevance screening via the Anthropic API — same prompt, different transport."""
+    numbered = "\n".join(
+        f'{idx + 1}. [id:{m.id}] {m.question}' for idx, m in enumerate(markets)
+    )
+    body_preview = (article.body or "")[:600].strip()
+    prompt = f"""You are a prediction-market relevance filter.
+
+Score each market question below for how directly the article affects or could resolve it.
+
+Scoring guide:
+  0.0 = completely unrelated
+  0.3 = tangentially related (same general topic, different specific question)
+  0.6 = probably relevant — article could move this market's price
+  0.9 = highly relevant — article directly addresses the market's resolution criteria
+  1.0 = article resolves or near-resolves the market
+
+Article headline: {article.title}
+Article summary: {body_preview}
+
+Markets to score:
+{numbered}
+
+Return ONLY a JSON array — one object per market, in the same order:
+[{{"id": "<market id from [id:...]>", "score": 0.0, "reason": "one sentence"}}]""".strip()
+
+    text = await _anthropic_request(prompt)
+    parsed = json.loads(text)
+    if isinstance(parsed, dict):
+        for v in parsed.values():
+            if isinstance(v, list):
+                parsed = v
+                break
+        else:
+            parsed = []
+    out: list[dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        market_id = str(item.get("id", "")).strip()
+        try:
+            score = float(item.get("score", 0.0))
+        except (TypeError, ValueError):
+            score = 0.0
+        out.append({"market_id": market_id, "score": score, "reason": item.get("reason", "")})
+    return out
+
+
+async def _anthropic_interpret(market: Market, article: NewsArticle) -> dict[str, Any]:
+    """Full interpretation using the Anthropic Messages API."""
+    extra_lines: list[str] = []
+    if market.rules_text:
+        extra_lines.append(f"Resolution rules:\n{market.rules_text}")
+    if market.resolution_source_text:
+        extra_lines.append(f"Authoritative resolution source: {market.resolution_source_text}")
+    if market.end_date:
+        extra_lines.append(f"Market closes: {market.end_date.date().isoformat()}")
+    extra_context = ("\n\n" + "\n\n".join(extra_lines)) if extra_lines else ""
+
+    prompt = f"""You are interpreting whether a news article resolves or materially affects a prediction market.
+Return ONLY valid JSON (no other text, no markdown fences).
+
+Market question:
+{market.question}
+
+Market resolution criteria:
+{market.description or "(not specified)"}
+{extra_context}
+
+Allowed outcomes: YES, NO, UNKNOWN
+
+Article title:
+{article.title}
+
+Article body:
+{article.body}
+
+Return schema:
+{{
+  "market_relevance": 0.0,
+  "interpreted_outcome": "YES|NO|UNKNOWN",
+  "evidence_type": "DIRECT|INDIRECT|PRELIMINARY|SPECULATIVE|NONE",
+  "supporting_excerpt": "...",
+  "confidence": 0.0,
+  "should_act": true,
+  "reason": "..."
+}}""".strip()
+
+    text = await _anthropic_request(prompt)
+    # Strip markdown code fences if the model adds them despite instructions
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[-1] if text.count("```") >= 2 else text.lstrip("`")
+        if text.startswith("json"):
+            text = text[4:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    return json.loads(text)
+
+
+async def _anthropic_verify(
+    market: Market, article: NewsArticle, interpretation: dict[str, Any]
+) -> dict[str, Any]:
+    """Skeptical verifier using the Anthropic Messages API."""
+    prompt = f"""You are a skeptical verifier. Your job is to find reasons the previous interpretation may be wrong.
+Return ONLY valid JSON (no other text, no markdown fences).
+
+Market question:
+{market.question}
+
+Resolution criteria:
+{market.description or ""}
+
+Article title:
+{article.title}
+
+Article body:
+{article.body}
+
+Proposed interpretation JSON:
+{json.dumps(interpretation)}
+
+Return schema:
+{{
+  "verifier_agrees": true,
+  "risk_flags": [],
+  "corrected_outcome": "YES|NO|UNKNOWN",
+  "confidence": 0.0,
+  "should_block_trade": false,
+  "reason": "..."
+}}""".strip()
+
+    text = await _anthropic_request(prompt)
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("```", 2)[-1] if text.count("```") >= 2 else text.lstrip("`")
+        if text.startswith("json"):
+            text = text[4:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    return json.loads(text)
+
+
+# ─── Fallback (no LLM configured) ────────────────────────────────────────────
+
 def _fallback_interpret(market: Market, article: NewsArticle) -> dict[str, Any]:
     # Conservative default for MVP: abstain unless trivially resolutive phrases appear.
     text = f"{article.title}\n{article.body}".lower()
@@ -197,7 +387,7 @@ def _fallback_verify(_: Market, __: NewsArticle, interpretation: dict[str, Any])
     should_block = interpretation.get("confidence", 0.0) < 0.95
     return {
         "verifier_agrees": not should_block,
-        "risk_flags": ["NO_LLM_CONFIGURED"] if settings.openai_api_key is None else [],
+        "risk_flags": ["NO_LLM_CONFIGURED"] if not _has_llm() else [],
         "corrected_outcome": interpretation.get("interpreted_outcome", "UNKNOWN"),
         "confidence": 0.2 if should_block else 0.9,
         "should_block_trade": should_block,
@@ -207,10 +397,26 @@ def _fallback_verify(_: Market, __: NewsArticle, interpretation: dict[str, Any])
 
 async def interpret_and_verify(market: Market, article: NewsArticle) -> tuple[dict[str, Any], dict[str, Any]]:
     if not settings.openai_api_key:
+        if settings.anthropic_api_key:
+            # Anthropic fallback path
+            try:
+                interp = await _anthropic_interpret(market, article)
+            except (httpx.HTTPError, json.JSONDecodeError, KeyError):
+                logger.exception("Anthropic interpret failed for market=%s article=%s", market.id, article.id)
+                interp = _fallback_interpret(market, article)
+                return interp, _verifier_after_llm_failure(interp)
+            try:
+                ver = await _anthropic_verify(market, article, interp)
+            except (httpx.HTTPError, json.JSONDecodeError, KeyError):
+                logger.exception("Anthropic verify failed for market=%s article=%s", market.id, article.id)
+                ver = _verifier_after_llm_failure(interp)
+            return interp, ver
+        # No LLM at all
         interp = _fallback_interpret(market, article)
         ver = _fallback_verify(market, article, interp)
         return interp, ver
 
+    # OpenAI primary path
     try:
         interp = await _openai_interpret(market, article)
     except (httpx.HTTPError, json.JSONDecodeError):
@@ -228,7 +434,7 @@ async def interpret_and_verify_with_timeout(
     market: Market, article: NewsArticle, *, timeout_seconds: float
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Same as interpret_and_verify but caps wall time (outer bound on LLM + HTTP)."""
-    if not settings.openai_api_key:
+    if not _has_llm():
         return await interpret_and_verify(market, article)
     try:
         return await asyncio.wait_for(interpret_and_verify(market, article), timeout=timeout_seconds)

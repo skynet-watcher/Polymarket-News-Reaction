@@ -35,11 +35,16 @@ class Settings(BaseSettings):
     lag_rank_weight_price: float = 0.8
     lag_rank_weight_resolution: float = 0.2
 
-    # LLM (optional)
+    # LLM — OpenAI (primary, optional)
     openai_api_key: Optional[str] = None
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model_interpreter: str = "gpt-4o-mini"
     openai_model_verifier: str = "gpt-4o-mini"
+
+    # LLM — Anthropic (fallback when openai_api_key is not set)
+    anthropic_api_key: Optional[str] = None
+    anthropic_base_url: str = "https://api.anthropic.com"
+    anthropic_model: str = "claude-haiku-4-5"
 
     # MVP gating defaults
     min_liquidity: float = 1000.0
