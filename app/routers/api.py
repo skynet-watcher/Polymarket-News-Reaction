@@ -15,7 +15,7 @@ from app.db import SessionLocal, get_session
 from app.job_status import build_system_status, run_tracked_job
 from app.settings import settings
 from app.util import now_utc
-from app.jobs import backtest_news_reactions, btc_signal_test, bulk_smoke_test, compute_lag, crypto_preflight, lag_rank, process_candidates, poll_news, settle_trades, signal_metrics, sync_markets
+from app.jobs import backtest_news_reactions, btc_signal_test, bulk_smoke_test, compute_lag, crypto_preflight, lag_rank, nba_test_watchlist, process_candidates, poll_news, settle_trades, short_term_watchlist, signal_metrics, sync_markets
 from app.live_feeds import ensure_live_news_sources
 from sqlalchemy import desc, select
 
@@ -242,8 +242,41 @@ async def job_crypto_preflight(
     Fetches active Polymarket crypto markets, classifies rule family,
     parses candle parameters, verifies against Binance, checks orderbooks.
     """
-    out = await crypto_preflight.run(market_limit=market_limit, include_resolved=include_resolved)
+    out = await run_tracked_job(
+        session,
+        "crypto_preflight",
+        lambda: crypto_preflight.run(market_limit=market_limit, include_resolved=include_resolved),
+    )
     return _job_response(request, out, "/analysis/crypto-preflight")
+
+
+@router.post("/jobs/nba_test_watchlist", response_model=None)
+async def job_nba_test_watchlist(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    fetch_orderbooks: bool = Query(True, description="Fetch CLOB top-of-book for each outcome token"),
+) -> Union[JSONResponse, RedirectResponse]:
+    """Fetch today's NBA test events by slug and upsert the selected short-term markets."""
+    out = await run_tracked_job(
+        session,
+        "nba_test_watchlist",
+        lambda: nba_test_watchlist.run(session, fetch_orderbooks=fetch_orderbooks),
+    )
+    return _job_response(request, out, "/analysis/nba-test-markets")
+
+
+@router.post("/jobs/short_term_watchlist", response_model=None)
+async def job_short_term_watchlist(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> Union[JSONResponse, RedirectResponse]:
+    """Fetch and score the reporting/event-monitoring short-term watchlist."""
+    out = await run_tracked_job(
+        session,
+        "short_term_watchlist",
+        lambda: short_term_watchlist.run(session),
+    )
+    return _job_response(request, out, "/analysis/short-term-watchlist")
 
 
 @router.get("/lag-measurements")

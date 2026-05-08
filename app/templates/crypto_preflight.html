@@ -45,8 +45,13 @@
   {% if counts.total == 0 %}
   <div class="bg-slate-800 border border-slate-700 rounded-lg p-8 text-center text-slate-400">
     <p class="text-4xl mb-3">📭</p>
+    {% if has_scanned %}
+    <p class="font-semibold text-slate-300 text-lg">No matching crypto Up/Down markets found</p>
+    <p class="text-sm mt-1">The last preflight scan completed successfully, but Polymarket currently has no active Up/Down candle markets to analyze.</p>
+    {% else %}
     <p class="font-semibold text-slate-300 text-lg">No markets scanned yet</p>
     <p class="text-sm mt-1">Hit "Run preflight scan now" above to fetch and analyse live Polymarket crypto markets.</p>
+    {% endif %}
   </div>
   {% else %}
 

@@ -16,7 +16,9 @@ from app.job_status import build_system_status
 from app.models import (
     BacktestCase,
     BacktestRun,
+    AuditLog,
     CryptoMarketProfile,
+    JobStatus,
     LagMeasurement,
     LagThresholdCrossing,
     Market,
@@ -32,6 +34,7 @@ from app.models import (
     ThresholdProfile,
 )
 from app.paper_economics import aggregate_portfolio, live_net_mark_usd
+from app.jobs import nba_test_watchlist, short_term_watchlist
 from app.security import validate_public_https_url, verify_bearer_secret
 from app.settings import settings as app_settings
 from app.threshold_context import RUNTIME_KEY_THRESHOLD_PROFILE, resolve_trading_thresholds
@@ -714,9 +717,12 @@ async def crypto_preflight_page(request: Request, session: AsyncSession = Depend
         "unknown": sum(1 for p in profiles if p.monitor_status == "UNKNOWN"),
     }
 
-    last_run: Optional[dt.datetime] = None
+    crypto_job = await session.get(JobStatus, "crypto_preflight")
+    last_run: Optional[dt.datetime] = crypto_job.last_success_at if crypto_job else None
     if profiles:
-        last_run = max((p.updated_at for p in profiles), default=None)
+        profile_last_run = max((p.updated_at for p in profiles), default=None)
+        if profile_last_run and (last_run is None or profile_last_run > last_run):
+            last_run = profile_last_run
 
     def _status_label(p: CryptoMarketProfile) -> str:
         m = p.monitor_status or "UNKNOWN"
@@ -780,6 +786,203 @@ async def crypto_preflight_page(request: Request, session: AsyncSession = Depend
             "counts": counts,
             "rows": rows,
             "last_run": last_run.strftime("%Y-%m-%d %H:%M UTC") if last_run else None,
+            "has_scanned": last_run is not None,
+        },
+    )
+
+
+@router.get("/analysis/nba-test-markets", response_class=HTMLResponse)
+async def nba_test_markets_page(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    """Today's short-term NBA test market setup."""
+    slugs = {item["polymarketEventSlug"] for item in nba_test_watchlist.WATCHLIST}
+    rows = (
+        await session.execute(
+            select(Market)
+            .where(Market.market_type == "NBA_TEST_MONEYLINE")
+            .where(Market.slug.is_not(None))
+            .order_by(Market.end_date.asc().nulls_last(), Market.slug.asc())
+        )
+    ).scalars().all()
+    rows = [m for m in rows if any(str(m.slug or "").startswith(slug) for slug in slugs)]
+
+    def _token_mappings(m: Market) -> list[dict[str, Optional[str]]]:
+        outcomes = m.outcomes_json or []
+        token_ids = m.token_ids_json or []
+        return [
+            {
+                "outcome": outcomes[i] if i < len(outcomes) else f"Outcome {i + 1}",
+                "token_id": token_id,
+            }
+            for i, token_id in enumerate(token_ids)
+        ]
+
+    market_rows = []
+    for m in rows:
+        trigger = "HALFTIME_SCORE" if "1h-moneyline" in str(m.slug or "") else "NBA_FINAL"
+        max_ask = (
+            nba_test_watchlist.EXPLORATORY_MODE["maxHalftimeAsk"]
+            if trigger == "HALFTIME_SCORE"
+            else nba_test_watchlist.EXPLORATORY_MODE["maxFinalAsk"]
+        )
+        spread = None
+        if m.best_bid_yes is not None and m.best_ask_yes is not None:
+            spread = float(m.best_ask_yes) - float(m.best_bid_yes)
+        checks = []
+        if not m.token_ids_json:
+            checks.append("NO_TRADE_MARKET_NOT_LINKED")
+        if m.best_ask_yes is None:
+            checks.append("NO_TRADE_NO_ORDERBOOK")
+        elif float(m.best_ask_yes) > float(max_ask):
+            checks.append("NO_TRADE_PRICE_ALREADY_SETTLED")
+        if spread is not None and spread > float(nba_test_watchlist.EXPLORATORY_MODE["maxSpread"]):
+            checks.append("NO_TRADE_SPREAD_TOO_WIDE")
+        event_slug = next((slug for slug in slugs if str(m.slug or "").startswith(slug)), m.slug)
+        meta = next((item for item in nba_test_watchlist.WATCHLIST if item["polymarketEventSlug"] == event_slug), {})
+        market_rows.append(
+            {
+                "id": m.id,
+                "condition_id": m.condition_id,
+                "slug": m.slug,
+                "question": m.question,
+                "outcomes": m.outcomes_json or [],
+                "token_mappings": _token_mappings(m),
+                "best_bid_yes": m.best_bid_yes,
+                "best_ask_yes": m.best_ask_yes,
+                "spread": spread,
+                "trigger": trigger,
+                "end_date": m.end_date.strftime("%Y-%m-%d %H:%M UTC") if m.end_date else None,
+                "resolution_source": m.resolution_source_text,
+                "polymarket_url": f"https://polymarket.com/event/{event_slug}",
+                "nba_game_id": meta.get("nbaGameId"),
+                "nba_game_url": meta.get("nbaGameUrl"),
+                "checks": checks,
+            }
+        )
+
+    job = await session.get(JobStatus, "nba_test_watchlist")
+    return templates.TemplateResponse(
+        "nba_test_markets.html",
+        {
+            "request": request,
+            "watchlist": nba_test_watchlist.WATCHLIST,
+            "exploratory_mode": nba_test_watchlist.EXPLORATORY_MODE,
+            "no_trade_reasons": nba_test_watchlist.NO_TRADE_REASONS,
+            "markets": market_rows,
+            "last_run": job.last_success_at.strftime("%Y-%m-%d %H:%M UTC") if job and job.last_success_at else None,
+            "last_error": job.last_error if job else None,
+        },
+    )
+
+
+@router.get("/analysis/short-term-watchlist", response_class=HTMLResponse)
+async def short_term_watchlist_page(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    """Reporting/event-monitoring watchlist for the next 24 hours."""
+    configured_slugs = {str(item["eventSlug"]) for item in short_term_watchlist.WATCHLIST}
+    rows = (
+        await session.execute(
+            select(Market)
+            .where(Market.market_type == "SHORT_TERM_WATCHLIST")
+            .where(Market.slug.is_not(None))
+            .order_by(Market.end_date.asc().nulls_last(), Market.best_ask_yes.asc().nulls_last())
+        )
+    ).scalars().all()
+
+    config_by_event = {str(item["eventSlug"]): item for item in short_term_watchlist.WATCHLIST}
+    audit_rows = (
+        await session.execute(
+            select(AuditLog)
+            .where(AuditLog.event_type == "WATCHLIST_SETUP_CHECK")
+            .where(AuditLog.market_id.is_not(None))
+            .order_by(AuditLog.created_at.desc())
+        )
+    ).scalars().all()
+    audit_event_by_market: dict[str, str] = {}
+    for audit in audit_rows:
+        if audit.market_id in audit_event_by_market:
+            continue
+        payload = audit.payload_json or {}
+        event_slug = payload.get("eventSlug")
+        if event_slug:
+            audit_event_by_market[str(audit.market_id)] = str(event_slug)
+
+    def _event_slug_for_market(m: Market) -> Optional[str]:
+        if m.id in audit_event_by_market:
+            return audit_event_by_market[m.id]
+        slug = str(m.slug or "")
+        for event_slug, config in config_by_event.items():
+            if slug == config.get("marketSlug"):
+                return event_slug
+            if any(str(part) in slug for part in (config.get("marketSlugContainsAny") or [])):
+                return event_slug
+            if slug.startswith(event_slug) or event_slug in slug:
+                return event_slug
+        return None
+
+    market_rows = []
+    for m in rows:
+        event_slug = _event_slug_for_market(m)
+        if not event_slug:
+            continue
+        config = config_by_event[event_slug]
+        spread = None
+        if m.best_bid_yes is not None and m.best_ask_yes is not None:
+            spread = float(m.best_ask_yes) - float(m.best_bid_yes)
+        checks = []
+        if not m.token_ids_json or m.best_ask_yes is None:
+            checks.append("NO_TRADE_NO_ORDERBOOK")
+        if m.best_ask_yes is not None and (float(m.best_ask_yes) >= short_term_watchlist.EXPLORATORY_MODE["maxAsk"] or float(m.best_ask_yes) <= 0.02):
+            checks.append("NO_TRADE_PRICE_ALREADY_MOVED")
+        if spread is not None and spread > float(short_term_watchlist.EXPLORATORY_MODE["maxSpread"]):
+            checks.append("NO_TRADE_AMBIGUOUS_RULE")
+        if not config.get("autoTradeEligible"):
+            checks.append("NO_TRADE_AMBIGUOUS_RULE")
+        checks = list(dict.fromkeys(checks))
+        score = 100
+        if not config.get("autoTradeEligible"):
+            score -= 20
+        if "NO_TRADE_PRICE_ALREADY_MOVED" in checks:
+            score -= 55
+        if "NO_TRADE_NO_ORDERBOOK" in checks:
+            score -= 40
+        if "NO_TRADE_AMBIGUOUS_RULE" in checks:
+            score -= 15
+        market_rows.append(
+            {
+                "id": m.id,
+                "condition_id": m.condition_id,
+                "slug": m.slug,
+                "question": m.question,
+                "outcomes": m.outcomes_json or [],
+                "token_ids": m.token_ids_json or [],
+                "best_bid_yes": m.best_bid_yes,
+                "best_ask_yes": m.best_ask_yes,
+                "spread": spread,
+                "end_date": m.end_date.strftime("%Y-%m-%d %H:%M UTC") if m.end_date else None,
+                "resolution_source": m.resolution_source_text,
+                "event_slug": event_slug,
+                "adapter": config.get("adapter"),
+                "priority": config.get("priority"),
+                "category": config.get("category"),
+                "source_model": config.get("sourceModel"),
+                "auto_trade_eligible": bool(config.get("autoTradeEligible")),
+                "checks": checks,
+                "score": max(0, min(100, score)),
+                "polymarket_url": f"https://polymarket.com/event/{event_slug}",
+            }
+        )
+    market_rows.sort(key=lambda row: (-int(row["score"]), int(row["priority"] or 999), str(row["slug"] or "")))
+
+    job = await session.get(JobStatus, "short_term_watchlist")
+    return templates.TemplateResponse(
+        "short_term_watchlist.html",
+        {
+            "request": request,
+            "watchlist": short_term_watchlist.WATCHLIST,
+            "exploratory_mode": short_term_watchlist.EXPLORATORY_MODE,
+            "signal_log_events": short_term_watchlist.SIGNAL_LOG_EVENTS,
+            "markets": market_rows,
+            "last_run": job.last_success_at.strftime("%Y-%m-%d %H:%M UTC") if job and job.last_success_at else None,
+            "last_error": job.last_error if job else None,
         },
     )
 

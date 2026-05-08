@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="space-y-6">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl font-bold text-white">Short-Term Watchlist</h1>
+      <p class="text-slate-400 mt-1 text-sm max-w-3xl">
+        Reporting/event-monitoring markets for next-24-hour testing. Event slugs are stable config; market IDs, condition IDs, token IDs, and current prices are fetched live from Gamma.
+      </p>
+    </div>
+    <div class="flex flex-col items-end gap-2">
+      <form class="js-async-job" method="post" action="/api/jobs/short_term_watchlist"
+            data-job-label="Short-term watchlist setup" data-done-url="/analysis/short-term-watchlist">
+        <button type="submit" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold whitespace-nowrap">
+          Fetch watchlist
+        </button>
+      </form>
+      {% if last_run %}
+        <span class="text-xs text-slate-500">Last setup: {{ last_run }}</span>
+      {% else %}
+        <span class="text-xs text-slate-500">Not fetched yet.</span>
+      {% endif %}
+      {% if last_error %}
+        <span class="text-xs text-red-400 max-w-md text-right">{{ last_error }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="grid gap-3 lg:grid-cols-3">
+    <div class="bg-slate-900 border border-slate-700 rounded-lg p-4 lg:col-span-2">
+      <h2 class="text-sm font-semibold text-slate-200 mb-3">Configured events</h2>
+      <div class="grid gap-2 md:grid-cols-2">
+        {% for item in watchlist %}
+        <div class="border border-slate-800 rounded p-3">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-medium text-white">{{ item.eventSlug }}</p>
+              <p class="text-xs text-slate-500 mt-1">{{ item.adapter }} · P{{ item.priority }}</p>
+            </div>
+            {% if item.autoTradeEligible %}
+              <span class="text-xs px-2 py-1 rounded bg-green-950 text-green-300 border border-green-800">direct</span>
+            {% else %}
+              <span class="text-xs px-2 py-1 rounded bg-slate-800 text-slate-300">log-only</span>
+            {% endif %}
+          </div>
+          <p class="text-xs text-slate-400 mt-2">{{ item.category }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="bg-slate-900 border border-slate-700 rounded-lg p-4">
+      <h2 class="text-sm font-semibold text-slate-200 mb-3">Runtime rules</h2>
+      <dl class="grid grid-cols-2 gap-2 text-sm">
+        {% for key, value in exploratory_mode.items() %}
+        <div class="border border-slate-800 rounded p-2">
+          <dt class="text-[11px] text-slate-500">{{ key }}</dt>
+          <dd class="text-slate-200 mt-1">{{ value }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+      <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 mt-4 mb-2">Signal/no-trade log events</h3>
+      <div class="flex flex-wrap gap-2">
+        {% for event in signal_log_events %}
+        <span class="text-xs px-2 py-1 rounded bg-slate-800 text-slate-300">{{ event }}</span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-slate-900 border border-slate-700 rounded-lg p-4">
+    <h2 class="text-sm font-semibold text-slate-200 mb-2">Critical read</h2>
+    <p class="text-sm text-slate-400 leading-relaxed">
+      This batch is better for source-layer testing than NBA finals, but most entries are not safe for automatic paper trades.
+      Visual, transcript, public-statement, and diplomacy markets should produce logged signals first, then trade only after adapter confidence is medium/high and the ask/spread gates still pass.
+      The direct sports rows are the cleanest automatic candidates, while prices already near 0 or 1 are useful mainly as no-trade latency evidence.
+    </p>
+  </div>
+
+  {% if markets %}
+  <div>
+    <h2 class="text-lg font-semibold text-slate-200 mb-3">Fetched markets ({{ markets | length }})</h2>
+    <div class="overflow-x-auto rounded-lg border border-slate-700">
+      <table class="w-full text-xs text-left">
+        <thead class="bg-slate-800 text-slate-400 uppercase text-[10px] tracking-wide">
+          <tr>
+            <th class="px-3 py-2">Score</th>
+            <th class="px-3 py-2">Market</th>
+            <th class="px-3 py-2">Adapter</th>
+            <th class="px-3 py-2">Price</th>
+            <th class="px-3 py-2">IDs</th>
+            <th class="px-3 py-2">Checks</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% for m in markets %}
+          <tr class="bg-slate-900/60 hover:bg-slate-800/60">
+            <td class="px-3 py-3 whitespace-nowrap">
+              {% if m.score >= 75 %}
+                <span class="text-green-300 font-semibold">{{ m.score }}</span>
+              {% elif m.score >= 45 %}
+                <span class="text-amber-300 font-semibold">{{ m.score }}</span>
+              {% else %}
+                <span class="text-red-300 font-semibold">{{ m.score }}</span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-3 min-w-[280px]">
+              <div class="text-slate-100 font-medium">{{ m.question }}</div>
+              <div class="text-slate-500 mt-1 break-all">{{ m.slug }}</div>
+              <div class="flex flex-wrap gap-2 mt-2 text-[11px] text-slate-400">
+                <span>{{ m.category }}</span>
+                {% if m.end_date %}<span>Ends {{ m.end_date }}</span>{% endif %}
+                <a class="text-indigo-400 hover:underline" target="_blank" href="{{ m.polymarket_url }}">Polymarket</a>
+              </div>
+            </td>
+            <td class="px-3 py-3 whitespace-nowrap">
+              <div class="text-slate-300">{{ m.adapter }}</div>
+              {% if m.auto_trade_eligible %}
+                <div class="text-green-300 mt-1">auto eligible</div>
+              {% else %}
+                <div class="text-slate-500 mt-1">log-only</div>
+              {% endif %}
+            </td>
+            <td class="px-3 py-3 whitespace-nowrap">
+              <div class="text-slate-300">
+                bid {{ "%.3f"|format(m.best_bid_yes) if m.best_bid_yes is not none else "n/a" }}
+                · ask {{ "%.3f"|format(m.best_ask_yes) if m.best_ask_yes is not none else "n/a" }}
+              </div>
+              {% if m.spread is not none %}
+                <div class="text-slate-500 mt-1">spread {{ "%.3f"|format(m.spread) }}</div>
+              {% endif %}
+            </td>
+            <td class="px-3 py-3 max-w-xs">
+              <div class="text-slate-400">market.id {{ m.id }}</div>
+              {% if m.condition_id %}<div class="text-slate-600 break-all mt-1">conditionId {{ m.condition_id }}</div>{% endif %}
+              {% if m.token_ids %}
+                <div class="text-slate-600 break-all mt-1">tokens {{ m.token_ids | length }}</div>
+              {% endif %}
+            </td>
+            <td class="px-3 py-3 max-w-sm">
+              {% if m.checks %}
+                <div class="flex flex-wrap gap-1">
+                  {% for check in m.checks %}
+                  <span class="px-2 py-1 rounded bg-amber-950 border border-amber-800 text-amber-300">{{ check }}</span>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <span class="text-green-300">Gates pass; wait for source signal.</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="bg-slate-800 border border-slate-700 rounded-lg p-8 text-center text-slate-400">
+    <p class="font-semibold text-slate-300 text-lg">No watchlist markets fetched yet</p>
+    <p class="text-sm mt-1">Run the setup above to fetch live Gamma IDs, token IDs, prices, and readiness checks.</p>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

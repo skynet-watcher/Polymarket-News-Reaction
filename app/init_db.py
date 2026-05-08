@@ -17,8 +17,10 @@ async def init_db(engine: AsyncEngine) -> None:
 
         # All migrations below are SQLite-only (they use PRAGMA which Postgres
         # doesn't have).  On Postgres (Vercel) create_all already produces the
-        # correct schema so no manual column additions are needed.
+        # correct schema for new databases; keep additive migrations here for
+        # already-created Postgres tables.
         if engine.dialect.name != "sqlite":
+            await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS condition_id VARCHAR"))
             return
 
         # Minimal migration support for SQLite: add new columns if missing.
@@ -42,6 +44,7 @@ async def init_db(engine: AsyncEngine) -> None:
         except Exception:
             pass
         await _ensure_column(conn, table="lag_measurements", column="eventual_move", ddl="ALTER TABLE lag_measurements ADD COLUMN eventual_move FLOAT")
+        await _ensure_column(conn, table="markets", column="condition_id", ddl="ALTER TABLE markets ADD COLUMN condition_id VARCHAR")
         await _ensure_column(conn, table="markets", column="winning_outcome", ddl="ALTER TABLE markets ADD COLUMN winning_outcome VARCHAR")
         await _ensure_column(conn, table="lag_measurements", column="signal_correct", ddl="ALTER TABLE lag_measurements ADD COLUMN signal_correct BOOLEAN")
         await _ensure_column(conn, table="markets", column="resolution_source_text", ddl="ALTER TABLE markets ADD COLUMN resolution_source_text TEXT")

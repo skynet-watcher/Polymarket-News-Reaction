@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="space-y-6">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl font-bold text-white">NBA Test Markets</h1>
+      <p class="text-slate-400 mt-1 text-sm max-w-3xl">
+        Slug-driven setup for today's short-term NBA playoff tests. Gamma IDs, condition IDs, and CLOB token IDs are fetched fresh from Polymarket at setup time.
+      </p>
+    </div>
+    <div class="flex flex-col items-end gap-2">
+      <form class="js-async-job" method="post" action="/api/jobs/nba_test_watchlist"
+            data-job-label="NBA test watchlist setup" data-done-url="/analysis/nba-test-markets">
+        <button type="submit"
+          class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold whitespace-nowrap">
+          Fetch today's test markets
+        </button>
+      </form>
+      {% if last_run %}
+        <span class="text-xs text-slate-500">Last setup: {{ last_run }}</span>
+      {% else %}
+        <span class="text-xs text-slate-500">Not fetched yet.</span>
+      {% endif %}
+      {% if last_error %}
+        <span class="text-xs text-red-400 max-w-md text-right">{{ last_error }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="grid gap-3 md:grid-cols-2">
+    <div class="bg-slate-900 border border-slate-700 rounded-lg p-4">
+      <h2 class="text-sm font-semibold text-slate-200 mb-3">Watchlist</h2>
+      <div class="space-y-2">
+        {% for item in watchlist %}
+        <div class="border border-slate-800 rounded p-3">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-medium text-white">{{ item.label }}</p>
+              <p class="text-xs text-slate-500">{{ item.polymarketEventSlug }} · {{ item.nbaGameId }}</p>
+            </div>
+            <span class="text-xs px-2 py-1 rounded bg-slate-800 text-slate-300">P{{ item.priority }}</span>
+          </div>
+          <div class="mt-2 text-xs text-slate-400">{{ item.trigger }} · {{ item.recommendedMode }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="bg-slate-900 border border-slate-700 rounded-lg p-4">
+      <h2 class="text-sm font-semibold text-slate-200 mb-3">Exploratory Mode</h2>
+      <dl class="grid grid-cols-2 gap-3 text-sm">
+        {% for key, value in exploratory_mode.items() %}
+        <div class="border border-slate-800 rounded p-3">
+          <dt class="text-xs text-slate-500">{{ key }}</dt>
+          <dd class="text-slate-200 font-medium mt-1">{{ value }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+      <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-500 mt-4 mb-2">No-trade reasons to log</h3>
+      <div class="flex flex-wrap gap-2">
+        {% for reason in no_trade_reasons %}
+        <span class="text-xs px-2 py-1 rounded bg-slate-800 text-slate-300">{{ reason }}</span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {% if markets %}
+  <div>
+    <h2 class="text-lg font-semibold text-slate-200 mb-3">Fetched markets ({{ markets | length }})</h2>
+    <div class="space-y-3">
+      {% for m in markets %}
+      <div class="bg-slate-900 border border-slate-700 rounded-lg p-4">
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-white">{{ m.question }}</p>
+            <p class="text-xs text-slate-500 mt-1 break-all">{{ m.slug }} · market.id {{ m.id }}</p>
+            {% if m.condition_id %}
+            <p class="text-xs text-slate-600 mt-1 break-all">conditionId {{ m.condition_id }}</p>
+            {% endif %}
+            <div class="flex flex-wrap gap-3 mt-2 text-xs text-slate-400">
+              <span>{{ m.trigger }}</span>
+              {% if m.end_date %}<span>Ends {{ m.end_date }}</span>{% endif %}
+              {% if m.nba_game_id %}<a class="text-indigo-400 hover:underline" target="_blank" href="{{ m.nba_game_url }}">NBA {{ m.nba_game_id }}</a>{% endif %}
+              <a class="text-indigo-400 hover:underline" target="_blank" href="{{ m.polymarket_url }}">Polymarket event</a>
+            </div>
+          </div>
+          <div class="text-xs text-right">
+            <div class="text-slate-500">YES top-of-book</div>
+            <div class="text-slate-200 mt-1">
+              bid {{ "%.3f"|format(m.best_bid_yes) if m.best_bid_yes is not none else "n/a" }}
+              · ask {{ "%.3f"|format(m.best_ask_yes) if m.best_ask_yes is not none else "n/a" }}
+              {% if m.spread is not none %}· spread {{ "%.3f"|format(m.spread) }}{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 grid gap-3 md:grid-cols-2">
+          {% for mapping in m.token_mappings %}
+          <div class="border border-slate-800 rounded p-3">
+            <div class="text-sm text-white font-medium">{{ mapping.outcome }}</div>
+            <div class="text-[11px] text-slate-500 break-all mt-1">{{ mapping.token_id }}</div>
+          </div>
+          {% endfor %}
+        </div>
+
+        {% if m.checks %}
+        <div class="mt-3 flex flex-wrap gap-2">
+          {% for check in m.checks %}
+          <span class="text-xs px-2 py-1 rounded bg-amber-950 border border-amber-800 text-amber-300">{{ check }}</span>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="mt-3 text-xs text-green-300">Setup checks passed. Await NBA trigger before paper trading.</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <div class="bg-slate-800 border border-slate-700 rounded-lg p-8 text-center text-slate-400">
+    <p class="font-semibold text-slate-300 text-lg">No NBA test markets fetched yet</p>
+    <p class="text-sm mt-1">Run the setup above to fetch Gamma event data by slug and display token mappings.</p>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

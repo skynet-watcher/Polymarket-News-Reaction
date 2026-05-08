@@ -18,6 +18,7 @@ class Market(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)  # polymarket market id
     event_id: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    condition_id: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
     slug: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
     question: Mapped[str] = mapped_column(Text)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

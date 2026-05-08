@@ -608,6 +608,7 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
                 m = Market(
                     id=market_id,
                     event_id=str(rm.get("eventId") or rm.get("event_id") or "") or None,
+                    condition_id=str(rm.get("conditionId") or rm.get("condition_id") or "") or None,
                     slug=rm.get("slug"),
                     question=question,
                     description=rm.get("description"),
@@ -633,6 +634,7 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
                 upserted += 1
             else:
                 existing.event_id = str(rm.get("eventId") or rm.get("event_id") or "") or existing.event_id
+                existing.condition_id = str(rm.get("conditionId") or rm.get("condition_id") or "") or existing.condition_id
                 existing.slug = rm.get("slug") or existing.slug
                 existing.question = question
                 existing.description = rm.get("description") or existing.description

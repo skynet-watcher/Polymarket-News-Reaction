@@ -33,6 +33,9 @@ JOB_LABELS: dict[str, str] = {
     "lag_backfill": "Lag backfill",
     "signal_metrics": "Signal metrics",
     "lag_ranks": "Lag ranks",
+    "crypto_preflight": "Crypto preflight",
+    "nba_test_watchlist": "NBA test watchlist",
+    "short_term_watchlist": "Short-term watchlist",
 }
 
 JOB_LINKS: dict[str, str] = {
@@ -45,6 +48,9 @@ JOB_LINKS: dict[str, str] = {
     "lag_ranks": "/analysis/laggy-markets",
     "settle_trades": "/trades",
     "backtest_news_reactions": "/analysis/backtests",
+    "crypto_preflight": "/analysis/crypto-preflight",
+    "nba_test_watchlist": "/analysis/nba-test-markets",
+    "short_term_watchlist": "/analysis/short-term-watchlist",
 }
 
 JOB_ACTIONS: dict[str, str] = {
@@ -56,6 +62,9 @@ JOB_ACTIONS: dict[str, str] = {
     "lag_ranks": "/api/jobs/compute_lag_ranks",
     "settle_trades": "/api/jobs/settle_trades",
     "backtest_news_reactions": "/api/jobs/backtest_news_reactions",
+    "crypto_preflight": "/api/jobs/crypto_preflight",
+    "nba_test_watchlist": "/api/jobs/nba_test_watchlist",
+    "short_term_watchlist": "/api/jobs/short_term_watchlist",
 }
 
 
