@@ -296,7 +296,9 @@ async def run(session: AsyncSession) -> dict[str, Any]:
 
             existing = (
                 await session.execute(
-                    select(NewsSignal).where(and_(NewsSignal.market_id == market.id, NewsSignal.article_id == article.id))
+                    select(NewsSignal)
+                    .where(and_(NewsSignal.market_id == market.id, NewsSignal.article_id == article.id))
+                    .limit(1)
                 )
             ).scalar_one_or_none()
             if existing is not None:
