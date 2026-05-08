@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import asyncio
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -28,6 +29,8 @@ EXPLORATORY_MODE: dict[str, Any] = {
     "requireSourceConfidence": "MEDIUM_OR_HIGH",
     "paperOnly": True,
 }
+
+FETCH_TIMEOUT_SECONDS = 6.0
 
 
 SIGNAL_LOG_EVENTS = [
@@ -193,15 +196,23 @@ def _is_binary(outcomes: list[str]) -> bool:
     return len(outcomes) == 2
 
 
-async def _fetch_event(slug: str) -> dict[str, Any]:
-    async with polymarket_async_client() as client:
-        url = f"{settings.polymarket_gamma_base_url}/events/slug/{slug}"
-        r = await get_with_retry(client, url)
-        r.raise_for_status()
-        data = r.json()
+async def _fetch_event(client, slug: str) -> dict[str, Any]:
+    url = f"{settings.polymarket_gamma_base_url}/events/slug/{slug}"
+    r = await get_with_retry(client, url, max_retries=0)
+    r.raise_for_status()
+    data = r.json()
     if not isinstance(data, dict):
         raise ValueError(f"Gamma event response for {slug} was not an object")
     return data
+
+
+async def _fetch_events_by_slug() -> dict[str, Any]:
+    async with polymarket_async_client() as client:
+        pairs = await asyncio.gather(
+            *(asyncio.wait_for(_fetch_event(client, str(config["eventSlug"])), timeout=FETCH_TIMEOUT_SECONDS) for config in WATCHLIST),
+            return_exceptions=True,
+        )
+    return {str(config["eventSlug"]): result for config, result in zip(WATCHLIST, pairs)}
 
 
 def _select_markets(config: dict[str, Any], event: dict[str, Any]) -> list[dict[str, Any]]:
@@ -286,15 +297,19 @@ async def run(session: AsyncSession) -> dict[str, Any]:
     markets_upserted = 0
     snapshots_created = 0
     audit_rows = 0
+    fetched_events = await _fetch_events_by_slug()
 
     for config in WATCHLIST:
         event_slug = str(config["eventSlug"])
-        try:
-            event = await _fetch_event(event_slug)
-            selected = _select_markets(config, event)
-        except Exception as exc:
-            events_out.append({"eventSlug": event_slug, "ok": False, "error": f"{type(exc).__name__}: {exc}", "markets": []})
+        event_result = fetched_events.get(event_slug)
+        if isinstance(event_result, Exception):
+            events_out.append({"eventSlug": event_slug, "ok": False, "error": f"{type(event_result).__name__}: {event_result}", "markets": []})
             continue
+        if not isinstance(event_result, dict):
+            events_out.append({"eventSlug": event_slug, "ok": False, "error": "missing_event_response", "markets": []})
+            continue
+        event = event_result
+        selected = _select_markets(config, event)
 
         event_markets: list[dict[str, Any]] = []
         for raw in selected:
