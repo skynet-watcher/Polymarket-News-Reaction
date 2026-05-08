@@ -161,10 +161,17 @@ async def run(session: AsyncSession, *, max_trades: int = 3) -> dict[str, Any]:
         )
     ).scalars().all()
 
+    # Build the set of auto-eligible categories dynamically from the WATCHLIST config so
+    # new entries with autoTradeEligible=True are picked up without editing this file.
+    auto_trade_categories = {
+        str(cfg["category"])
+        for cfg in short_term_watchlist.WATCHLIST
+        if cfg.get("autoTradeEligible")
+    }
+
     created = 0
     skipped: list[dict[str, Any]] = []
     trades: list[dict[str, Any]] = []
-    direct_categories = {"Less-watched sports / PLL lacrosse", "Less-watched sports / KBO baseball"}
 
     for market in markets:
         if created >= max_trades:
@@ -173,7 +180,7 @@ async def run(session: AsyncSession, *, max_trades: int = 3) -> dict[str, Any]:
         ask = float(snapshot.best_ask_yes if snapshot and snapshot.best_ask_yes is not None else market.best_ask_yes)
         spread = _spread(market, snapshot)
         reason: Optional[str] = None
-        if market.category not in direct_categories:
+        if market.category not in auto_trade_categories:
             reason = "NO_TRADE_AMBIGUOUS_RULE"
         elif ask >= float(short_term_watchlist.EXPLORATORY_MODE["maxAsk"]) or ask <= 0.02:
             reason = "NO_TRADE_PRICE_ALREADY_MOVED"
