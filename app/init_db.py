@@ -15,13 +15,42 @@ async def init_db(engine: AsyncEngine) -> None:
             await conn.execute(text("SELECT pg_advisory_xact_lock(912337001)"))
         await conn.run_sync(Base.metadata.create_all)
 
-        # All migrations below are SQLite-only (they use PRAGMA which Postgres
-        # doesn't have).  On Postgres (Vercel) create_all already produces the
-        # correct schema for new databases; keep additive migrations here for
-        # already-created Postgres tables.
         if engine.dialect.name != "sqlite":
+            # Existing Vercel Postgres databases are not altered by create_all.
+            # Keep these additive and nullable/defaulted so cold starts can
+            # safely upgrade older deployments in place.
+            await conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN IF NOT EXISTS spread FLOAT"))
+            await conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN IF NOT EXISTS volume_24h FLOAT"))
+            await conn.execute(text("ALTER TABLE price_snapshots ADD COLUMN IF NOT EXISTS data_quality VARCHAR DEFAULT 'OK'"))
+            await conn.execute(text("ALTER TABLE lag_measurements ADD COLUMN IF NOT EXISTS eventual_move FLOAT"))
+            await conn.execute(text("ALTER TABLE lag_measurements ADD COLUMN IF NOT EXISTS signal_correct BOOLEAN"))
             await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS condition_id VARCHAR"))
+            await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS winning_outcome VARCHAR"))
+            await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS resolution_source_text TEXT"))
+            await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS rules_text TEXT"))
+            await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS enable_orderbook BOOLEAN DEFAULT TRUE"))
+            await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS volume_24h FLOAT"))
+            await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS market_type VARCHAR"))
+            await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS is_control_market BOOLEAN DEFAULT FALSE"))
+            await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS manipulation_risk_flag BOOLEAN DEFAULT FALSE"))
+            await conn.execute(text("ALTER TABLE markets ADD COLUMN IF NOT EXISTS is_fixture BOOLEAN DEFAULT FALSE"))
+            await conn.execute(text("ALTER TABLE news_signals ADD COLUMN IF NOT EXISTS signal_source_type VARCHAR"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS execution_context_json JSON"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS notional_usd FLOAT"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS entry_fee_usd FLOAT"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS settlement_fee_usd FLOAT"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS cash_spent_usd FLOAT"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS gross_pnl_usd FLOAT"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS net_pnl_usd FLOAT"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS trade_source VARCHAR DEFAULT 'LIVE'"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS backtest_case_id VARCHAR"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS settlement_source VARCHAR"))
+            await conn.execute(text("ALTER TABLE backtest_cases ADD COLUMN IF NOT EXISTS signal_action VARCHAR"))
+            await conn.execute(text("ALTER TABLE backtest_cases ADD COLUMN IF NOT EXISTS hours_to_resolution FLOAT"))
             return
+
+        # Minimal migration support for SQLite: add new columns if missing.
+        # (SQLAlchemy create_all does not alter existing tables.)
 
         # Minimal migration support for SQLite: add new columns if missing.
         # (SQLAlchemy create_all does not alter existing tables.)
