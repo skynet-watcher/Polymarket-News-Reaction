@@ -203,6 +203,30 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             )
         ).scalars().all()
 
+    # Always supplement with near-resolution markets (ending within 36h) regardless
+    # of their liquidity rank.  Game-day sports markets (e.g. tonight's NBA playoff
+    # game) sit at rank #200-400 by total liquidity but are exactly the markets we
+    # want the pipeline to catch when ESPN publishes a result.
+    near_resolution_cutoff = now_utc() + dt.timedelta(hours=36)
+    near_resolution_markets = (
+        await session.execute(
+            select(Market)
+            .where(
+                and_(
+                    Market.active == True,  # noqa: E712
+                    Market.closed == False,  # noqa: E712
+                    Market.end_date != None,  # noqa: E711
+                    Market.end_date <= near_resolution_cutoff,
+                )
+            )
+            .order_by(desc(Market.liquidity))
+            .limit(50)
+        )
+    ).scalars().all()
+    # Merge without duplicates (preserve existing list order; append new).
+    existing_ids = {m.id for m in markets}
+    markets = list(markets) + [m for m in near_resolution_markets if m.id not in existing_ids]
+
     signals_created = 0
     keyword_candidates_total = 0
     llm_screened = 0

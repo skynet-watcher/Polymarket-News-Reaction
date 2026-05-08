@@ -23,6 +23,10 @@ _sync_markets_lock = asyncio.Lock()
 
 RUNTIME_KEY_SYNC_MARKETS_SOURCE = "sync_markets_data_source"
 
+# Sports tag slugs used for game-day market sweep.  Each tag has O(10-100)
+# active events so a single page per tag captures all current games.
+_SPORTS_TAG_SLUGS = ["nba", "nfl", "mlb", "nhl", "soccer", "mls", "tennis"]
+
 
 def _on_vercel() -> bool:
     return bool(os.environ.get("VERCEL"))
@@ -228,6 +232,41 @@ async def _fetch_near_resolution_markets(
         return []
 
 
+async def _fetch_sports_events(client: httpx.AsyncClient, limit: int = 100) -> list[dict[str, Any]]:
+    """
+    Fetch active game-day markets for major sports by querying each sport's tag slug.
+
+    Sports game markets (e.g. 'Knicks vs. 76ers') rank very low in global
+    volume sorts — the game started 3 days ago and has only $2M lifetime
+    volume vs billion-dollar political markets.  But filtering by tag_slug
+    makes the set small enough that a single page captures all current games.
+
+    Each sport tag has O(10-100) active events, so one request per tag
+    (7 total) is sufficient even on Vercel.  Events are flattened into
+    individual market rows by _flatten_event_markets.
+    """
+    markets: list[dict[str, Any]] = []
+    url = f"{settings.polymarket_gamma_base_url}/events"
+    for tag in _SPORTS_TAG_SLUGS:
+        try:
+            r = await get_with_retry(
+                client,
+                url,
+                params={
+                    "active": "true",
+                    "closed": "false",
+                    "tag_slug": tag,
+                    "limit": limit,
+                },
+            )
+            r.raise_for_status()
+            events = _normalize_events_payload(r.json())
+            markets.extend(_flatten_event_markets(events))
+        except (httpx.HTTPError, httpx.RequestError):
+            continue
+    return markets
+
+
 async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str, Any]]:
     """
     Always runs BOTH fetch paths and merges results.
@@ -240,7 +279,9 @@ async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str
       1. Seed from /events (richer metadata, good ordering).
       2. Overwrite/supplement with /markets data — adds tokenIds to existing
          entries and picks up any markets the events path missed.
-      3. Union near-resolution sweep (markets ending within 48h) on top.
+      3. Sports-tag sweep adds game-day markets (NBA, NFL, etc.) that rank
+         too low in global volume sorts to appear in step 1.
+      4. Union near-resolution sweep (markets ending within 48h) on top.
     """
     events_exc: Optional[Exception] = None
     markets_exc: Optional[Exception] = None
@@ -263,6 +304,16 @@ async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str
 
     # Near-resolution sweep is optional — never blocks on failure.
     near_resolution = await _fetch_near_resolution_markets(client, within_hours=48, limit=25 if _on_vercel() else 50)
+
+    # Sports-tag sweep: fetches ALL active events for each major sport via
+    # tag_slug filter.  Each sport has O(10-100) events so one page captures
+    # every game-day market (e.g. tonight's NBA playoff game) that would
+    # otherwise be buried beyond page 1 in global volume sorts.
+    # This is optional and never blocks on failure.
+    try:
+        sports_markets = await _fetch_sports_events(client, limit=100)
+    except Exception:
+        sports_markets = []
 
     by_id: dict[str, dict[str, Any]] = {}
 
@@ -290,6 +341,13 @@ async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str
                 if not existing.get(key) and rm.get(key):
                     existing[key] = rm[key]
         else:
+            by_id[mid] = rm
+
+    # Sports-tag entries: add if not already present (events metadata already
+    # seeded from from_events above; this catches game markets that were missed).
+    for rm in sports_markets:
+        mid = str(rm.get("id") or rm.get("market_id") or "").strip()
+        if mid and mid not in by_id:
             by_id[mid] = rm
 
     # Near-resolution entries overwrite with the freshest data.
