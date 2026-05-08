@@ -113,7 +113,7 @@ async def _fetch_gamma_events(
     events: list[dict[str, Any]] = []
     offset = 0
     extra_params = extra_params or {}
-    max_offset = 0 if _on_vercel() else 2000
+    max_offset = 2000
     while True:
         params: Dict[str, Any] = {"limit": limit, "offset": offset, **extra_params}
         r = await get_with_retry(client, url, params=params)
@@ -139,7 +139,7 @@ async def _fetch_gamma_markets(
     offset = 0
     extra_params = extra_params or {}
     url = f"{settings.polymarket_gamma_base_url}/markets"
-    max_offset = 0 if _on_vercel() else 2000
+    max_offset = 2000
     while True:
         params: Dict[str, Any] = {"limit": limit, "offset": offset, **extra_params}
         r = await get_with_retry(client, url, params=params)
@@ -287,13 +287,13 @@ async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str
     markets_exc: Optional[Exception] = None
 
     try:
-        from_events = await _fetch_gamma_open_and_closed_via_events(client, limit=25 if _on_vercel() else 100)
+        from_events = await _fetch_gamma_open_and_closed_via_events(client, limit=100)
     except (httpx.HTTPError, httpx.RequestError) as e:
         from_events = []
         events_exc = e
 
     try:
-        from_markets = await _fetch_gamma_open_and_closed_markets_fallback(client, limit=50 if _on_vercel() else 200)
+        from_markets = await _fetch_gamma_open_and_closed_markets_fallback(client, limit=200)
     except (httpx.HTTPError, httpx.RequestError) as e:
         from_markets = []
         markets_exc = e
@@ -303,7 +303,7 @@ async def _fetch_all_markets_unified(client: httpx.AsyncClient) -> list[dict[str
         raise markets_exc
 
     # Near-resolution sweep is optional — never blocks on failure.
-    near_resolution = await _fetch_near_resolution_markets(client, within_hours=48, limit=25 if _on_vercel() else 50)
+    near_resolution = await _fetch_near_resolution_markets(client, within_hours=48, limit=50)
 
     # Sports-tag sweep: fetches ALL active events for each major sport via
     # tag_slug filter.  Each sport has O(10-100) events so one page captures
@@ -589,7 +589,7 @@ async def _run_sync_markets(session: AsyncSession) -> dict[str, Any]:
 
             best_bid: Optional[float] = None
             best_ask: Optional[float] = None
-            clob_limit = min(settings.sync_clob_snapshot_limit, 10) if _on_vercel() else settings.sync_clob_snapshot_limit
+            clob_limit = settings.sync_clob_snapshot_limit
             if enable_ob and token_ids_yes and clob_attempted < clob_limit:
                 clob_attempted += 1
                 best_bid, best_ask = await _fetch_best_bid_ask_yes(client, token_ids_yes)

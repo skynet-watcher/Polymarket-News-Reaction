@@ -78,11 +78,11 @@ async def cron_poll(
     session: AsyncSession = Depends(get_session),
     _: None = Depends(verify_bearer_secret),
 ) -> JSONResponse:
-    """Poll news + process candidates — the signal generation half of the pipeline."""
+    """Poll news + watchlist monitor — fast half of the signal pipeline.
+    process_candidates runs separately on /cron/process with its own time budget."""
     results: dict[str, object] = {}
     for name, fn in [
         ("poll_news", poll_news.run),
-        ("process_candidates", process_candidates.run),
         ("watchlist_monitor", lambda s=session: watchlist_monitor.run(s, max_trades=3)),
     ]:
         try:
@@ -93,6 +93,22 @@ async def cron_poll(
             logger.exception("cron_poll: %s failed", name)
             results[name] = {"ok": False, "error": str(exc)}
     return JSONResponse({"ok": True, "steps": results})
+
+
+@router.get("/cron/process")
+async def cron_process(
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(verify_bearer_secret),
+) -> JSONResponse:
+    """LLM candidate processing — runs every minute with its own 300s time budget,
+    independent of poll_news so neither blocks the other."""
+    try:
+        out = await run_tracked_job(session, "process_candidates", lambda: process_candidates.run(session))
+        return JSONResponse({"ok": True, "result": out})
+    except Exception as exc:
+        await session.rollback()
+        logger.exception("cron_process: process_candidates failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 @router.get("/cron/lag-pipeline")

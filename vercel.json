@@ -2,7 +2,7 @@
   "version": 2,
   "functions": {
     "api/index.py": {
-      "maxDuration": 60
+      "maxDuration": 300
     }
   },
   "routes": [
@@ -11,6 +11,7 @@
   "crons": [
     { "path": "/api/cron/sync",         "schedule": "* * * * *"    },
     { "path": "/api/cron/poll",         "schedule": "* * * * *"    },
+    { "path": "/api/cron/process",      "schedule": "* * * * *"    },
     { "path": "/api/cron/settle",       "schedule": "*/5 * * * *"  },
     { "path": "/api/cron/lag-pipeline", "schedule": "0 6 * * *"    },
     { "path": "/api/cron/pipeline",     "schedule": "0 4 * * *"    }

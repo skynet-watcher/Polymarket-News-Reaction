@@ -59,7 +59,7 @@ async def _process_one_candidate_signal(signal_id: str, semaphore: asyncio.Semap
                 interpretation, verifier = await interpret_and_verify_with_timeout(
                     market,
                     article,
-                    timeout_seconds=min(settings.llm_call_timeout_seconds, 20.0) if _on_vercel() else settings.llm_call_timeout_seconds,
+                    timeout_seconds=settings.llm_call_timeout_seconds,
                 )
 
                 sig.interpreted_outcome = interpretation.get("interpreted_outcome", "UNKNOWN")
@@ -126,13 +126,12 @@ async def run(session: AsyncSession) -> dict[str, Any]:
     t_run = time.perf_counter()
     tctx = await resolve_trading_thresholds(session)
     cutoff = now_utc() - dt.timedelta(minutes=tctx.max_article_age_minutes)
-    article_limit = 3 if _on_vercel() else 100
     articles = (
         await session.execute(
             select(NewsArticle)
             .where(NewsArticle.published_at >= cutoff)
             .order_by(desc(NewsArticle.published_at))
-            .limit(article_limit)
+            .limit(100)
         )
     ).scalars().all()
     if not articles:
@@ -145,7 +144,7 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             "match_phase_ms": 0,
             "llm_phase_ms": 0,
             "llm_max_concurrency": settings.llm_max_concurrency,
-            "llm_enabled": settings.openai_api_key is not None,
+            "llm_enabled": bool(settings.openai_api_key or settings.anthropic_api_key),
             "lag_focus_top_n": await _lag_focus_top_n(session),
             "threshold_profile_id": tctx.profile_id,
             "threshold_profile_label": tctx.profile_label,
@@ -160,10 +159,10 @@ async def run(session: AsyncSession) -> dict[str, Any]:
         }
 
     focus_n = await _lag_focus_top_n(session)
-    market_limit = min(settings.matcher_market_limit, 30) if _on_vercel() else settings.matcher_market_limit
-    keyword_max_candidates = min(settings.matcher_keyword_max_candidates, 5) if _on_vercel() else settings.matcher_keyword_max_candidates
-    llm_batch_size = min(settings.matcher_llm_batch_size, 5) if _on_vercel() else settings.matcher_llm_batch_size
-    max_llm_calls = min(settings.max_llm_calls_per_run, 2) if _on_vercel() else settings.max_llm_calls_per_run
+    market_limit = settings.matcher_market_limit
+    keyword_max_candidates = settings.matcher_keyword_max_candidates
+    llm_batch_size = settings.matcher_llm_batch_size
+    max_llm_calls = settings.max_llm_calls_per_run
     if focus_n > 0:
         top_ids = (
             await session.execute(
@@ -323,12 +322,12 @@ async def run(session: AsyncSession) -> dict[str, Any]:
             select(NewsSignal)
             .where(NewsSignal.action == "CANDIDATE")
             .order_by(desc(NewsSignal.created_at))
-            .limit(2 if _on_vercel() else 200)
+            .limit(200)
         )
     ).scalars().all()
 
     t_llm = time.perf_counter()
-    effective_concurrency = 1 if _on_vercel() else settings.llm_max_concurrency
+    effective_concurrency = settings.llm_max_concurrency
     sem = asyncio.Semaphore(max(1, effective_concurrency))
     results = await asyncio.gather(*[_process_one_candidate_signal(s.id, sem) for s in candidates])
     llm_phase_ms = int((time.perf_counter() - t_llm) * 1000)
