@@ -15,7 +15,7 @@ from app.db import SessionLocal, get_session
 from app.job_status import build_system_status, run_tracked_job
 from app.settings import settings
 from app.util import now_utc
-from app.jobs import backtest_news_reactions, btc_signal_test, bulk_smoke_test, compute_lag, crypto_preflight, lag_rank, nba_test_watchlist, process_candidates, poll_news, settle_trades, short_term_watchlist, signal_metrics, sync_markets
+from app.jobs import backtest_news_reactions, btc_signal_test, bulk_smoke_test, compute_lag, crypto_preflight, lag_rank, nba_test_watchlist, process_candidates, poll_news, settle_trades, short_term_watchlist, signal_metrics, sync_markets, watchlist_monitor
 from app.live_feeds import ensure_live_news_sources
 from sqlalchemy import desc, select
 
@@ -277,6 +277,21 @@ async def job_short_term_watchlist(
         lambda: short_term_watchlist.run(session),
     )
     return _job_response(request, out, "/analysis/short-term-watchlist")
+
+
+@router.post("/jobs/watchlist_monitor", response_model=None)
+async def job_watchlist_monitor(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    max_trades: int = Query(3, ge=1, le=10),
+) -> Union[JSONResponse, RedirectResponse]:
+    """Run the overnight watchlist monitor and create paper-only probe trades."""
+    out = await run_tracked_job(
+        session,
+        "watchlist_monitor",
+        lambda: watchlist_monitor.run(session, max_trades=max_trades),
+    )
+    return _job_response(request, out, "/trades")
 
 
 @router.get("/lag-measurements")

@@ -36,6 +36,7 @@ JOB_LABELS: dict[str, str] = {
     "crypto_preflight": "Crypto preflight",
     "nba_test_watchlist": "NBA test watchlist",
     "short_term_watchlist": "Short-term watchlist",
+    "watchlist_monitor": "Watchlist monitor",
 }
 
 JOB_LINKS: dict[str, str] = {
@@ -51,6 +52,7 @@ JOB_LINKS: dict[str, str] = {
     "crypto_preflight": "/analysis/crypto-preflight",
     "nba_test_watchlist": "/analysis/nba-test-markets",
     "short_term_watchlist": "/analysis/short-term-watchlist",
+    "watchlist_monitor": "/trades",
 }
 
 JOB_ACTIONS: dict[str, str] = {
@@ -65,6 +67,7 @@ JOB_ACTIONS: dict[str, str] = {
     "crypto_preflight": "/api/jobs/crypto_preflight",
     "nba_test_watchlist": "/api/jobs/nba_test_watchlist",
     "short_term_watchlist": "/api/jobs/short_term_watchlist",
+    "watchlist_monitor": "/api/jobs/watchlist_monitor",
 }
 
 

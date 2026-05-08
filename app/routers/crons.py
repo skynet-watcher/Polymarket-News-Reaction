@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.job_status import run_tracked_job
-from app.jobs import compute_lag, lag_rank, poll_news, process_candidates, settle_trades, signal_metrics, sync_markets
+from app.jobs import compute_lag, lag_rank, poll_news, process_candidates, settle_trades, signal_metrics, sync_markets, watchlist_monitor
 from app.security import verify_bearer_secret
 
 logger = logging.getLogger(__name__)
@@ -83,6 +83,7 @@ async def cron_poll(
     for name, fn in [
         ("poll_news", poll_news.run),
         ("process_candidates", process_candidates.run),
+        ("watchlist_monitor", lambda s=session: watchlist_monitor.run(s, max_trades=3)),
     ]:
         try:
             out = await run_tracked_job(session, name, lambda f=fn: f(session))

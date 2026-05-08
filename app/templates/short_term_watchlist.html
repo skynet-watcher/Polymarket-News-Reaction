@@ -16,6 +16,12 @@
           Fetch watchlist
         </button>
       </form>
+      <form class="js-async-job" method="post" action="/api/jobs/watchlist_monitor"
+            data-job-label="Watchlist monitor" data-done-url="/trades">
+        <button type="submit" class="px-4 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-sm font-semibold whitespace-nowrap">
+          Run monitor and paper probes
+        </button>
+      </form>
       {% if last_run %}
         <span class="text-xs text-slate-500">Last setup: {{ last_run }}</span>
       {% else %}
