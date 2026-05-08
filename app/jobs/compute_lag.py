@@ -198,6 +198,12 @@ async def run_backfill(
             await session.commit()
             continue
 
+        # Persist lm before adding child rows (SignalDriftWindow, LagThresholdCrossing)
+        # that FK-reference lm.id.  Without this flush a later query auto-flushes the
+        # children first, hitting the FK constraint before the parent row is in the DB.
+        session.add(lm)
+        await session.flush()
+
         # Drift windows (PRE and POST): nearest snapshot at or before target time.
         pre_moves: dict[int, Optional[float]] = {}
         for w in PRE_WINDOWS_MIN:
@@ -389,7 +395,7 @@ async def run_backfill(
         else:
             lm.price_lag_status = "NEVER_CROSSED" if not market_ended_early else "MARKET_CLOSED_FIRST"
 
-        session.add(lm)
+        # lm was already added to session and flushed above (before child rows).
         created += 1
 
     await session.commit()
