@@ -4,7 +4,7 @@ import datetime as dt
 from typing import Any
 from typing import Optional, List, Dict
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -269,6 +269,17 @@ class PaperTrade(Base):
     backtest_case_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("backtest_cases.id"), index=True, nullable=True
     )
+
+    # Sports latency MVP: paper-only result trades and missed-window simulations.
+    sports_watch_market_id: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    sports_trade_type: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    trigger_source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    trigger_observed_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    outcome_side: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    entry_ask_size: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    resolved_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    settlement_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pnl_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
 
@@ -612,6 +623,125 @@ class CryptoMarketProfile(Base):
         default=lambda: dt.datetime.now(dt.timezone.utc),
         onupdate=lambda: dt.datetime.now(dt.timezone.utc),
     )
+
+
+class SportsWatchlist(Base):
+    """One same-day sports market watched for settlement latency."""
+
+    __tablename__ = "sports_watchlist"
+    __table_args__ = (
+        UniqueConstraint("market_id", "watchlist_date", name="uq_sports_watchlist_market_date"),
+        Index("ix_sports_watchlist_date_status", "watchlist_date", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    market_id: Mapped[str] = mapped_column(String, index=True)
+    condition_id: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    token_ids_json: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    market_name: Mapped[str] = mapped_column(Text)
+    event_slug: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    league: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    sport: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    home_team: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    away_team: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source_game_ids_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    scheduled_start_utc: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expected_end_utc: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution_rules_raw_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_clean: Mapped[bool] = mapped_column(Boolean, default=False)
+    exclusion_reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    watchlist_date: Mapped[dt.date] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String, default="active", index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: dt.datetime.now(dt.timezone.utc),
+        onupdate=lambda: dt.datetime.now(dt.timezone.utc),
+    )
+
+
+class SourceObservation(Base):
+    """Append-only normalized result observation from independent or market-side sources."""
+
+    __tablename__ = "source_observations"
+    __table_args__ = (Index("ix_source_observations_market_observed", "market_id", "observed_at"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    poll_run_id: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    market_id: Mapped[str] = mapped_column(String, index=True)
+    condition_id: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    source: Mapped[str] = mapped_column(String, index=True)
+    source_role: Mapped[str] = mapped_column(String, index=True)  # independent | market_side
+    sport: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    league: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    source_game_id: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    observed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    source_reported_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    timestamp_type: Mapped[str] = mapped_column(String, default="app_observed")
+    raw_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    normalized_status: Mapped[str] = mapped_column(String, index=True)
+    home_team: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    away_team: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    home_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    away_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    winner: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # home | away | draw
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    raw_payload_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    raw_payload_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
+
+
+class MarketResolutionRecord(Base):
+    """One derived timestamp comparison row per watched market."""
+
+    __tablename__ = "market_resolution_records"
+
+    market_id: Mapped[str] = mapped_column(String, primary_key=True)
+    condition_id: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    independent_source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    independent_source_observed_final_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    independent_source_reported_final_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    polymarket_sports_ws_final_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    polymarket_sports_ws_timestamp_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    polymarket_market_resolved_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    tradable_window_observed_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tradable_window_reported_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    polymarket_internal_delay_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    signal_case: Mapped[Optional[str]] = mapped_column(String, index=True, nullable=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: dt.datetime.now(dt.timezone.utc),
+        onupdate=lambda: dt.datetime.now(dt.timezone.utc),
+    )
+
+
+class PollRun(Base):
+    """One scheduled/manual sports latency job execution."""
+
+    __tablename__ = "poll_runs"
+
+    run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    job_type: Mapped[str] = mapped_column(String, index=True)
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[Optional[dt.datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String, default="running", index=True)
+    markets_polled: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class WatchedEventLog(Base):
+    """Immutable sports latency event log."""
+
+    __tablename__ = "watched_event_log"
+    __table_args__ = (Index("ix_watched_event_log_market_time", "market_id", "event_at_utc"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    market_id: Mapped[str] = mapped_column(String, index=True)
+    event_type: Mapped[str] = mapped_column(String, index=True)
+    event_at_utc: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
+    source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    detail_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc))
 
 
 class AuditLog(Base):

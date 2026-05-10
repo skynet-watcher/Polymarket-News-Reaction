@@ -45,8 +45,25 @@ async def init_db(engine: AsyncEngine) -> None:
             await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS trade_source VARCHAR DEFAULT 'LIVE'"))
             await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS backtest_case_id VARCHAR"))
             await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS settlement_source VARCHAR"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS sports_watch_market_id VARCHAR"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS sports_trade_type VARCHAR"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS trigger_source VARCHAR"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS trigger_observed_at TIMESTAMPTZ"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS outcome_side VARCHAR"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS entry_ask_size FLOAT"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS settlement_price FLOAT"))
+            await conn.execute(text("ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS pnl_status VARCHAR"))
             await conn.execute(text("ALTER TABLE backtest_cases ADD COLUMN IF NOT EXISTS signal_action VARCHAR"))
             await conn.execute(text("ALTER TABLE backtest_cases ADD COLUMN IF NOT EXISTS hours_to_resolution FLOAT"))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS unique_sports_paper_trade_market "
+                "ON paper_trades (sports_watch_market_id) WHERE sports_trade_type = 'paper_trade'"
+            ))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS unique_sports_missed_window_market "
+                "ON paper_trades (sports_watch_market_id) WHERE sports_trade_type = 'missed_window_simulation'"
+            ))
             return
 
         # Minimal migration support for SQLite: add new columns if missing.
@@ -129,6 +146,68 @@ async def init_db(engine: AsyncEngine) -> None:
             column="settlement_source",
             ddl="ALTER TABLE paper_trades ADD COLUMN settlement_source VARCHAR",
         )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="sports_watch_market_id",
+            ddl="ALTER TABLE paper_trades ADD COLUMN sports_watch_market_id VARCHAR",
+        )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="sports_trade_type",
+            ddl="ALTER TABLE paper_trades ADD COLUMN sports_trade_type VARCHAR",
+        )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="trigger_source",
+            ddl="ALTER TABLE paper_trades ADD COLUMN trigger_source VARCHAR",
+        )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="trigger_observed_at",
+            ddl="ALTER TABLE paper_trades ADD COLUMN trigger_observed_at DATETIME",
+        )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="outcome_side",
+            ddl="ALTER TABLE paper_trades ADD COLUMN outcome_side VARCHAR",
+        )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="entry_ask_size",
+            ddl="ALTER TABLE paper_trades ADD COLUMN entry_ask_size FLOAT",
+        )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="resolved_at",
+            ddl="ALTER TABLE paper_trades ADD COLUMN resolved_at DATETIME",
+        )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="settlement_price",
+            ddl="ALTER TABLE paper_trades ADD COLUMN settlement_price FLOAT",
+        )
+        await _ensure_column(
+            conn,
+            table="paper_trades",
+            column="pnl_status",
+            ddl="ALTER TABLE paper_trades ADD COLUMN pnl_status VARCHAR",
+        )
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS unique_sports_paper_trade_market "
+            "ON paper_trades (sports_watch_market_id) WHERE sports_trade_type = 'paper_trade'"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS unique_sports_missed_window_market "
+            "ON paper_trades (sports_watch_market_id) WHERE sports_trade_type = 'missed_window_simulation'"
+        ))
         await _ensure_column(
             conn,
             table="backtest_cases",

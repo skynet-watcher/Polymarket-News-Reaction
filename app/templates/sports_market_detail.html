@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="space-y-6">
+  <div>
+    <a href="/sports" class="text-sm text-slate-400 hover:text-slate-200">← Sports watchlist</a>
+    <h1 class="mt-2 text-2xl font-semibold">{{ watch.market_name if watch else market_id }}</h1>
+    {% if watch %}
+      <p class="mt-1 text-sm text-slate-400">{{ watch.league }} · {{ watch.home_team or "home unknown" }} vs {{ watch.away_team or "away unknown" }}</p>
+    {% endif %}
+  </div>
+
+  <section class="rounded border border-slate-800 bg-slate-900 p-4">
+    <h2 class="font-semibold">Bakeoff clocks</h2>
+    <div class="mt-3 grid gap-3 md:grid-cols-3">
+      <div class="rounded bg-slate-950 p-3">
+        <div class="text-xs uppercase text-slate-500">T0 observed</div>
+        <div class="mt-1 text-sm">{{ record.independent_source_observed_final_at if record and record.independent_source_observed_final_at else "pending" }}</div>
+      </div>
+      <div class="rounded bg-slate-950 p-3">
+        <div class="text-xs uppercase text-slate-500">T1 Polymarket sports WS</div>
+        <div class="mt-1 text-sm">{{ record.polymarket_sports_ws_final_at if record and record.polymarket_sports_ws_final_at else "pending" }}</div>
+      </div>
+      <div class="rounded bg-slate-950 p-3">
+        <div class="text-xs uppercase text-slate-500">T2 market resolved</div>
+        <div class="mt-1 text-sm">{{ record.polymarket_market_resolved_at if record and record.polymarket_market_resolved_at else "pending" }}</div>
+      </div>
+    </div>
+    {% if record %}
+      <div class="mt-4 text-sm text-slate-300">
+        Observed window:
+        {% if record.tradable_window_observed_ms is not none %}{{ "%.1f"|format(record.tradable_window_observed_ms / 1000) }}s{% else %}pending{% endif %}
+        · Reported window:
+        {% if record.tradable_window_reported_ms is not none %}{{ "%.1f"|format(record.tradable_window_reported_ms / 1000) }}s{% else %}pending{% endif %}
+        · Internal delay:
+        {% if record.polymarket_internal_delay_ms is not none %}{{ "%.1f"|format(record.polymarket_internal_delay_ms / 1000) }}s{% else %}pending{% endif %}
+        · Case: {{ record.signal_case or "pending" }}
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="rounded border border-slate-800 bg-slate-900 p-4">
+    <h2 class="font-semibold">Source observations</h2>
+    <div class="mt-3 overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="text-left text-xs uppercase text-slate-500">
+          <tr><th class="py-2">Observed</th><th>Source</th><th>Role</th><th>Status</th><th>Winner</th><th>Confidence</th><th>Hash</th></tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800">
+          {% for obs in observations %}
+            <tr>
+              <td class="py-2">{{ obs.observed_at }}</td>
+              <td>{{ obs.source }}</td>
+              <td>{{ obs.source_role }}</td>
+              <td>{{ obs.normalized_status }} <span class="text-slate-500">({{ obs.raw_status }})</span></td>
+              <td>{{ obs.winner or "—" }}</td>
+              <td>{{ "%.2f"|format(obs.confidence) }}</td>
+              <td class="font-mono text-xs text-slate-500">{{ obs.raw_payload_hash[:12] if obs.raw_payload_hash else "—" }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7" class="py-6 text-center text-slate-400">No observations yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="rounded border border-slate-800 bg-slate-900 p-4">
+    <h2 class="font-semibold">Paper trades</h2>
+    <div class="mt-3 space-y-2 text-sm">
+      {% for trade in trades %}
+        <div class="rounded bg-slate-950 p-3">
+          <div>{{ trade.sports_trade_type }} · {{ trade.side }} · status {{ trade.status }}</div>
+          <div class="mt-1 text-slate-400">trigger {{ trade.trigger_source }} at {{ trade.trigger_observed_at }} · entry {{ trade.fill_price }} · pnl {{ trade.pnl_final if trade.pnl_final is not none else "pending" }}</div>
+        </div>
+      {% else %}
+        <div class="text-slate-400">No paper trade or missed-window simulation yet.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="rounded border border-slate-800 bg-slate-900 p-4">
+    <h2 class="font-semibold">Event timeline</h2>
+    <div class="mt-3 space-y-3 text-sm">
+      {% for event in events %}
+        <div class="border-l-2 border-slate-700 pl-3">
+          <div class="text-slate-200">{{ event.event_at_utc }} · {{ event.event_type }} · {{ event.source or "system" }}</div>
+          <pre class="mt-1 whitespace-pre-wrap text-xs text-slate-500">{{ event.detail_json }}</pre>
+        </div>
+      {% else %}
+        <div class="text-slate-400">No event log rows yet.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if watch %}
+    <section class="rounded border border-slate-800 bg-slate-900 p-4">
+      <h2 class="font-semibold">Resolution rules snapshot</h2>
+      <p class="mt-3 whitespace-pre-wrap text-sm text-slate-300">{{ watch.resolution_rules_raw_text or "No rules text captured." }}</p>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

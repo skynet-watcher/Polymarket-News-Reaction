@@ -178,6 +178,13 @@ async def _startup() -> None:
         logger.info("startup: running on Vercel — background loops disabled, cron endpoints active")
         return
 
+    if not os.environ.get("ENABLE_LEGACY_BACKGROUND_LOOPS"):
+        logger.info(
+            "startup: sports latency branch — legacy background loops disabled locally; "
+            "use manual Sports Watchlist buttons or Vercel cron endpoints"
+        )
+        return
+
     asyncio.create_task(_snapshot_loop())
 
     async def _warm_start() -> None:
