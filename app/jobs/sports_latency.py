@@ -95,7 +95,9 @@ async def begin_poll_run(session: AsyncSession, job_type: str) -> tuple[Optional
         return None, True
     run = PollRun(run_id=new_id("pollrun"), job_type=job_type, started_at=now_utc(), status="running")
     session.add(run)
-    await session.flush()
+    # Commit the run marker immediately so overlapping Vercel/manual invocations
+    # can see it before the long job finishes.
+    await session.commit()
     return run, False
 
 
@@ -137,7 +139,7 @@ async def build_watchlist(session: AsyncSession) -> dict[str, Any]:
                 )
                 raw_markets.extend(_flatten_events_with_event_fields(events))
 
-        for raw in raw_markets:
+        for raw in _dedupe_raw_markets(raw_markets):
             seen += 1
             market_id = str(raw.get("id") or raw.get("market_id") or "").strip()
             name = str(raw.get("question") or raw.get("title") or raw.get("eventTitle") or "").strip()
@@ -153,14 +155,15 @@ async def build_watchlist(session: AsyncSession) -> dict[str, Any]:
                 is_clean = False
                 reason = "unsupported_market_type"
 
-            existing = (
-                await session.execute(
-                    select(SportsWatchlist).where(
-                        SportsWatchlist.market_id == market_id,
-                        SportsWatchlist.watchlist_date == day,
+            with session.no_autoflush:
+                existing = (
+                    await session.execute(
+                        select(SportsWatchlist).where(
+                            SportsWatchlist.market_id == market_id,
+                            SportsWatchlist.watchlist_date == day,
+                        )
                     )
-                )
-            ).scalar_one_or_none()
+                ).scalar_one_or_none()
             token_ids = sync_markets._gamma_token_ids(raw)  # noqa: SLF001
             condition_id = _str_or_none(raw.get("conditionId") or raw.get("condition_id"))
             teams = _teams_from_raw(raw, name)
@@ -852,6 +855,26 @@ def _flatten_events_with_event_fields(events: list[dict[str, Any]]) -> list[dict
             merged.setdefault("eventTitle", ev.get("title"))
             rows.append(merged)
     return rows
+
+
+def _dedupe_raw_markets(raw_markets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Gamma sports tag sweeps can return the same market through multiple tags/events."""
+    by_id: dict[str, dict[str, Any]] = {}
+    for raw in raw_markets:
+        mid = str(raw.get("id") or raw.get("market_id") or "").strip()
+        if not mid:
+            continue
+        if mid not in by_id:
+            by_id[mid] = raw
+            continue
+        existing = by_id[mid]
+        # Prefer the row with richer game metadata, but keep any fields the
+        # existing row already had. This avoids duplicate inserts without losing
+        # condition IDs or token IDs.
+        merged = dict(raw)
+        merged.update({k: v for k, v in existing.items() if v not in (None, "", [], {})})
+        by_id[mid] = merged
+    return list(by_id.values())
 
 
 def _league_from_raw(raw: dict[str, Any]) -> str:
