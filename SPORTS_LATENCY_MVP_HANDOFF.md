@@ -72,3 +72,23 @@ The worker must:
 
 This worker is intentionally a timestamp collector only. It should not contain paper-trade business logic.
 
+## Overnight Run Notes — 2026-05-10
+
+Chad left a local overnight backstop running because the Vercel preview is still behind deployment protection (`401` from the preview URL without Vercel login).
+
+Running locally:
+
+- Sports collector LaunchAgent: `/Users/eric/Library/LaunchAgents/com.eric.polymarket.sports-latency-loop.plist`
+- Local UI LaunchAgent: `/Users/eric/Library/LaunchAgents/com.eric.polymarket.local-ui.plist`
+- Keep-awake LaunchAgent: `/Users/eric/Library/LaunchAgents/com.eric.polymarket.keepawake.plist`
+- Local dashboard: `http://127.0.0.1:8000/`
+- Collector log: `logs/sports_latency_launchd.err.log`
+- UI log: `logs/local_ui_launchd.err.log`
+
+Fixes pushed on `sports-latency-mvp`:
+
+- `2f1fa1e` guards watchlist times by actual game time instead of market-created `startDate`.
+- `586313a` normalizes naive/aware datetimes before settlement metrics.
+- `e3c2043` forces the local collector to run settlement checks immediately after restart.
+
+Two early paper trades were invalidated in local SQLite because they were created before these guards and matched stale final scores against future same-team markets. They remain in the audit trail as `INVALIDATED`, not deleted.
