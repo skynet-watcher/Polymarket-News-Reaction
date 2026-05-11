@@ -115,6 +115,17 @@ def test_resolution_metrics_keep_observed_and_reported_separate():
     assert rec.signal_case == "normal"
 
 
+def test_resolution_metrics_normalize_naive_and_aware_timestamps():
+    rec = MarketResolutionRecord(
+        market_id="m1",
+        independent_source_observed_final_at=dt.datetime(2026, 5, 9, 4, 0),
+        polymarket_market_resolved_at=dt.datetime(2026, 5, 9, 4, 0, 20, tzinfo=dt.timezone.utc),
+    )
+    _compute_metrics(rec)
+    assert rec.tradable_window_observed_ms == 20_000
+    assert rec.signal_case == "settlement_without_sports_signal"
+
+
 def test_classifier_rejects_futures_and_first_half_markets():
     clean, reason = _classify_market(
         {"question": "Will Cleveland Cavaliers receive the first overall pick at the 2026 NBA Draft Lottery?", "gameId": None},

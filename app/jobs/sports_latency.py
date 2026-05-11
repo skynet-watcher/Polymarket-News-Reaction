@@ -736,29 +736,44 @@ async def _resolution_record(session: AsyncSession, market_id: str, condition_id
 
 
 def _compute_metrics(rec: MarketResolutionRecord) -> None:
-    if rec.polymarket_market_resolved_at and rec.independent_source_observed_final_at:
-        rec.tradable_window_observed_ms = _ms(rec.polymarket_market_resolved_at - rec.independent_source_observed_final_at)
-    if rec.polymarket_market_resolved_at and rec.independent_source_reported_final_at:
-        rec.tradable_window_reported_ms = _ms(rec.polymarket_market_resolved_at - rec.independent_source_reported_final_at)
-    if rec.polymarket_market_resolved_at and rec.polymarket_sports_ws_final_at:
-        rec.polymarket_internal_delay_ms = _ms(rec.polymarket_market_resolved_at - rec.polymarket_sports_ws_final_at)
+    resolved_at = _as_utc(rec.polymarket_market_resolved_at)
+    observed_at = _as_utc(rec.independent_source_observed_final_at)
+    reported_at = _as_utc(rec.independent_source_reported_final_at)
+    sports_ws_at = _as_utc(rec.polymarket_sports_ws_final_at)
+    if resolved_at and observed_at:
+        rec.tradable_window_observed_ms = _ms(resolved_at - observed_at)
+    if resolved_at and reported_at:
+        rec.tradable_window_reported_ms = _ms(resolved_at - reported_at)
+    if resolved_at and sports_ws_at:
+        rec.polymarket_internal_delay_ms = _ms(resolved_at - sports_ws_at)
     rec.signal_case = _signal_case(rec)
 
 
 def _signal_case(rec: MarketResolutionRecord) -> str:
-    if rec.independent_source_observed_final_at and rec.polymarket_market_resolved_at and rec.independent_source_observed_final_at > rec.polymarket_market_resolved_at:
+    observed_at = _as_utc(rec.independent_source_observed_final_at)
+    sports_ws_at = _as_utc(rec.polymarket_sports_ws_final_at)
+    resolved_at = _as_utc(rec.polymarket_market_resolved_at)
+    if observed_at and resolved_at and observed_at > resolved_at:
         return "missed_window"
-    if rec.independent_source_observed_final_at and rec.polymarket_sports_ws_final_at and rec.polymarket_market_resolved_at:
+    if observed_at and sports_ws_at and resolved_at:
         return "normal"
-    if rec.polymarket_sports_ws_final_at and not rec.polymarket_market_resolved_at:
+    if sports_ws_at and not resolved_at:
         return "sports_ws_no_settlement"
-    if rec.polymarket_market_resolved_at and not rec.polymarket_sports_ws_final_at:
+    if resolved_at and not sports_ws_at:
         return "settlement_without_sports_signal"
     return "expired_unresolved"
 
 
 def _ms(delta: dt.timedelta) -> int:
     return int(delta.total_seconds() * 1000)
+
+
+def _as_utc(value: Optional[dt.datetime]) -> Optional[dt.datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt.timezone.utc)
+    return value.astimezone(dt.timezone.utc)
 
 
 async def _finalize_sports_trades(session: AsyncSession, watch: SportsWatchlist, winning_outcome: Optional[str]) -> None:
