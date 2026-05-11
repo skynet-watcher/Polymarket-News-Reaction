@@ -146,7 +146,25 @@ async def build_watchlist(session: AsyncSession) -> dict[str, Any]:
             if not market_id or not name:
                 continue
             scheduled = _event_time(raw)
+            if scheduled is None:
+                await _exclude_existing_watchlist_row(
+                    session,
+                    market_id=market_id,
+                    day=day,
+                    reason="no_scheduled_start",
+                    scheduled=None,
+                    name=name,
+                )
+                continue
             if scheduled and not (start <= scheduled < end):
+                await _exclude_existing_watchlist_row(
+                    session,
+                    market_id=market_id,
+                    day=day,
+                    reason="outside_watch_window",
+                    scheduled=scheduled,
+                    name=name,
+                )
                 continue
             league = _league_from_raw(raw)
             sport = _sport_from_league(league)
@@ -247,6 +265,8 @@ async def poll_sources(session: AsyncSession) -> dict[str, Any]:
 
         async with polymarket_async_client() as client:
             for watch in rows:
+                if not _within_monitoring_window(watch):
+                    continue
                 markets_polled += 1
                 obs = await _fetch_observations_for_watch(client, watch)
                 for ob in obs:
@@ -468,6 +488,16 @@ async def _store_observation(session: AsyncSession, poll_run_id: str, ob: FinalS
 
 
 async def _handle_final_trigger(session: AsyncSession, watch: SportsWatchlist, ob: FinalStateObservation) -> str:
+    if not _observation_after_game_start(watch, ob):
+        await log_event(
+            session,
+            market_id=watch.market_id,
+            event_type="trade_skipped",
+            source=ob.source,
+            detail={"reason": "final_before_scheduled_game_window", "observed_at": ob.observed_at.isoformat()},
+            event_at=ob.observed_at,
+        )
+        return "ignored"
     rec = await _resolution_record(session, watch.market_id, watch.condition_id)
     if rec.independent_source_observed_final_at is None:
         rec.independent_source = ob.source
@@ -893,14 +923,97 @@ def _sport_from_league(league: str) -> str:
 
 
 def _event_time(raw: dict[str, Any]) -> Optional[dt.datetime]:
-    for key in ("gameStartTime", "game_start_time", "endDate", "end_date", "end_date_iso", "startDate", "start_date"):
+    for key in ("gameStartTime", "game_start_time", "eventDate", "event_date", "endDate", "end_date", "end_date_iso"):
         value = raw.get(key)
         if not value:
             continue
-        parsed = sync_markets._parse_dt(value)  # noqa: SLF001
+        parsed = sync_markets._parse_dt(_normalize_gamma_datetime(value))  # noqa: SLF001
         if parsed is not None:
             return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
     return None
+
+
+def _normalize_gamma_datetime(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if stripped.endswith("+00"):
+        return f"{stripped}:00"
+    return stripped
+
+
+def _within_monitoring_window(watch: SportsWatchlist, *, now: Optional[dt.datetime] = None) -> bool:
+    if watch.scheduled_start_utc is None:
+        return False
+    current = now or now_utc()
+    current = current if current.tzinfo else current.replace(tzinfo=dt.timezone.utc)
+    scheduled = watch.scheduled_start_utc
+    scheduled = scheduled if scheduled.tzinfo else scheduled.replace(tzinfo=dt.timezone.utc)
+    return scheduled - dt.timedelta(hours=1) <= current <= scheduled + dt.timedelta(hours=8)
+
+
+def _observation_after_game_start(watch: SportsWatchlist, ob: FinalStateObservation) -> bool:
+    if watch.scheduled_start_utc is None:
+        return False
+    observed = ob.observed_at if ob.observed_at.tzinfo else ob.observed_at.replace(tzinfo=dt.timezone.utc)
+    scheduled = watch.scheduled_start_utc
+    scheduled = scheduled if scheduled.tzinfo else scheduled.replace(tzinfo=dt.timezone.utc)
+    return observed >= scheduled - dt.timedelta(hours=1)
+
+
+async def _exclude_existing_watchlist_row(
+    session: AsyncSession,
+    *,
+    market_id: str,
+    day: dt.date,
+    reason: str,
+    scheduled: Optional[dt.datetime],
+    name: str,
+) -> None:
+    """Quarantine stale same-day rows when refreshed Gamma data shows they are not today's game."""
+    with session.no_autoflush:
+        existing = (
+            await session.execute(
+                select(SportsWatchlist).where(
+                    SportsWatchlist.market_id == market_id,
+                    SportsWatchlist.watchlist_date == day,
+                )
+            )
+        ).scalar_one_or_none()
+    if existing is None:
+        return
+    existing.status = "excluded"
+    existing.is_clean = False
+    existing.exclusion_reason = reason
+    existing.scheduled_start_utc = scheduled
+    await _invalidate_sports_trades_for_market(session, market_id, reason=reason)
+    await log_event(
+        session,
+        market_id=market_id,
+        event_type="trade_skipped",
+        source="watchlist_build",
+        detail={"market_name": name, "reason": reason},
+    )
+
+
+async def _invalidate_sports_trades_for_market(session: AsyncSession, market_id: str, *, reason: str) -> None:
+    trades = (
+        await session.execute(
+            select(PaperTrade).where(
+                PaperTrade.sports_watch_market_id == market_id,
+                PaperTrade.sports_trade_type == "paper_trade",
+                PaperTrade.pnl_status == "open",
+            )
+        )
+    ).scalars().all()
+    for trade in trades:
+        trade.status = "INVALIDATED"
+        trade.pnl_status = "invalidated"
+        trade.execution_context_json = {
+            **(trade.execution_context_json or {}),
+            "invalidated_reason": reason,
+            "invalidated_at": now_utc().isoformat(),
+        }
 
 
 def _classify_market(raw: dict[str, Any], *, league: str) -> tuple[bool, Optional[str]]:

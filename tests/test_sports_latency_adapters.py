@@ -2,7 +2,11 @@ import datetime as dt
 
 from app.jobs.sports_latency import _compute_metrics
 from app.jobs.sports_latency import _classify_market
+from app.jobs.sports_latency import _event_time
+from app.jobs.sports_latency import _observation_after_game_start
+from app.jobs.sports_latency import _within_monitoring_window
 from app.models import MarketResolutionRecord
+from app.models import SportsWatchlist
 from app.sports_latency.adapters import (
     normalize_espn_event,
     normalize_mlb_stats_api,
@@ -125,3 +129,57 @@ def test_classifier_rejects_futures_and_first_half_markets():
     )
     assert not clean
     assert reason == "unsupported_market_type"
+
+
+def test_event_time_prefers_actual_game_time_over_market_start_date():
+    parsed = _event_time(
+        {
+            "gameStartTime": "2026-05-16 04:00:00+00",
+            "startDate": "2026-05-10T04:03:21.518534Z",
+        }
+    )
+    assert parsed == dt.datetime(2026, 5, 16, 4, 0, tzinfo=dt.timezone.utc)
+
+
+def test_event_time_ignores_market_created_start_date():
+    assert _event_time({"startDate": "2026-05-10T04:03:21.518534Z"}) is None
+
+
+def test_monitoring_window_blocks_future_games():
+    watch = SportsWatchlist(
+        id="w1",
+        market_id="m1",
+        watchlist_date=NOW.date(),
+        market_name="Timberwolves vs. Spurs",
+        scheduled_start_utc=NOW + dt.timedelta(days=1),
+        status="active",
+        is_clean=True,
+    )
+    assert not _within_monitoring_window(watch, now=NOW)
+    assert _within_monitoring_window(watch, now=NOW + dt.timedelta(hours=23, minutes=30))
+
+
+def test_final_observation_before_game_window_cannot_trigger():
+    watch = SportsWatchlist(
+        id="w1",
+        market_id="m1",
+        watchlist_date=NOW.date(),
+        market_name="Timberwolves vs. Spurs",
+        scheduled_start_utc=NOW + dt.timedelta(days=1),
+        status="active",
+        is_clean=True,
+    )
+    obs = normalize_nba_live_cdn(
+        {
+            "game": {
+                "gameStatusText": "Final",
+                "homeTeam": {"teamName": "Spurs", "score": 110},
+                "awayTeam": {"teamName": "Timberwolves", "score": 100},
+            }
+        },
+        market_id="m1",
+        condition_id="c1",
+        source_game_id="001",
+        observed_at=NOW,
+    )
+    assert not _observation_after_game_start(watch, obs)
