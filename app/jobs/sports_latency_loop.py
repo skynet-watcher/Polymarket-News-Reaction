@@ -32,7 +32,7 @@ async def run_loop(*, poll_seconds: int = 60, settle_seconds: int = 300, once: b
     await init_db(engine)
     logger.info("sports latency loop starting poll_seconds=%s settle_seconds=%s", poll_seconds, settle_seconds)
     await _run_job("sports_build_watchlist", sports_latency.build_watchlist)
-    last_settle = 0.0
+    last_settle = time.monotonic() - settle_seconds
     while True:
         await _run_job("sports_poll_sources", sports_latency.poll_sources)
         now = time.monotonic()
@@ -59,4 +59,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
