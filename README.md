@@ -1,4 +1,16 @@
-## Polymarket News-Reaction (Paper Trading MVP)
+## Sports Settlement Latency MVP
+
+Current branch focus: same-day NBA/NHL/MLB settlement latency and paper-only outcome trades. See [`SPORTS_LATENCY_MVP_HANDOFF.md`](SPORTS_LATENCY_MVP_HANDOFF.md) for the active build spec and next infrastructure step.
+
+The core question is: after an independent sports source showed Final, was Polymarket still tradable before market settlement, and what would paper PnL have been?
+
+Safety rule: `trading_enabled = false` is enforced as a constant. This app does not place real orders or use private trading keys.
+
+High-priority next step after the Vercel-first slice: deploy the persistent Polymarket WebSocket worker scaffolded in [`workers/sports_ws`](workers/sports_ws). Vercel runs the UI/API/crons; the worker should hold the long-lived sports and market WebSocket connections.
+
+---
+
+## Legacy Polymarket News-Reaction (Paper Trading MVP)
 
 Sprint tasks for Chad: see [`CHAD_SPRINT.md`](CHAD_SPRINT.md) and [`ALEX_REVIEW.md`](ALEX_REVIEW.md). Status UI / Lucy notes: [`LUCY_STATUS_UI_HANDOFF.md`](LUCY_STATUS_UI_HANDOFF.md). Source repo: [github.com/skynet-watcher/Polymarket-News-Reaction](https://github.com/skynet-watcher/Polymarket-News-Reaction).
 

@@ -11,9 +11,9 @@
       <div class="flex items-center justify-between mb-6">
         <div>
           <a href="/" class="text-xl font-semibold text-slate-100 hover:text-white hover:underline decoration-slate-500 underline-offset-4 block w-fit">
-            Polymarket News-Reaction (Paper MVP)
+            Sports Settlement Latency MVP
           </a>
-          <div class="text-xs text-slate-400">Paper trading only • Whitelisted sources only • High-confidence or abstain</div>
+          <div class="text-xs text-slate-400">Paper only • Independent final-state sources • Observed timestamps only</div>
         </div>
         <details class="group">
           <summary class="cursor-pointer px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 text-sm text-slate-400 select-none list-none">
@@ -49,6 +49,16 @@
               <button type="submit" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">Settle trades</button>
             </form>
             <div class="w-full border-t border-slate-700 my-1"></div>
+            <form class="js-async-job" method="post" action="/api/jobs/sports/build_watchlist" data-job-label="Build sports watchlist" data-done-url="/sports">
+              <button type="submit" class="px-3 py-2 rounded bg-emerald-700 hover:bg-emerald-600 text-sm">Build sports watchlist</button>
+            </form>
+            <form class="js-async-job" method="post" action="/api/jobs/sports/poll_sources" data-job-label="Poll sports sources" data-done-url="/sports">
+              <button type="submit" class="px-3 py-2 rounded bg-teal-700 hover:bg-teal-600 text-sm">Run sports poll now</button>
+            </form>
+            <form class="js-async-job" method="post" action="/api/jobs/sports/check_settlements" data-job-label="Check sports settlements" data-done-url="/sports">
+              <button type="submit" class="px-3 py-2 rounded bg-cyan-700 hover:bg-cyan-600 text-sm">Check sports settlements</button>
+            </form>
+            <div class="w-full border-t border-slate-700 my-1"></div>
             <form class="js-reset-job" method="post" action="/api/admin/reset?scope=trades" data-confirm="Delete ALL paper trades? This cannot be undone." data-job-label="Reset trades" data-done-url="/trades">
               <button type="submit" class="px-3 py-1 bg-rose-800 hover:bg-rose-700 rounded text-sm">Reset trades</button>
             </form>
@@ -63,7 +73,7 @@
       </div>
 
       <p class="text-xs text-slate-500 mb-4 max-w-4xl leading-relaxed">
-        <strong class="text-slate-400">Automation:</strong> background intervals come from <code class="text-slate-400">.env</code> / <code class="text-slate-400">app/settings.py</code> (defaults: news poll 600s, candidates 540s, lag pipeline hourly). Set any to <code class="text-slate-400">0</code> to disable that loop. Use <code class="text-slate-400">REALTIME_PAPER_QUICKSTART=1</code> for faster overnight paper (see README). Market sync uses <code class="text-slate-400">snapshot_interval_seconds</code>; settlement uses <code class="text-slate-400">background_settle_interval_seconds</code>.
+        <strong class="text-slate-400">Safety:</strong> this branch is paper-only. The sports latency MVP uses observed independent-source final timestamps for paper-trade claims and logs missed windows separately from trades.
       </p>
 
       <div
@@ -74,21 +84,12 @@
       ></div>
 
       <div class="flex gap-2 mb-6 text-sm">
-        <a class="px-3 py-2 rounded bg-indigo-800 hover:bg-indigo-700 font-semibold" href="/health">System Health</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/">Dashboard</a>
+        <a class="px-3 py-2 rounded bg-indigo-800 hover:bg-indigo-700 font-semibold" href="/">Sports Watchlist</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/health">System Health</a>
         <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/markets">Markets</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/news">News</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/signals">Signals</a>
         <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/trades">Paper trades</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis">Analysis</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/backtests">Backtests</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/lags">Lag analysis</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/laggy-markets">Laggy markets</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/soft-accuracy">Soft accuracy</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/short-term-watchlist">Short-Term Watchlist</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/nba-test-markets">NBA Test Markets</a>
-        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/analysis/crypto-preflight">⚡ Crypto Preflight</a>
         <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/settings">Settings</a>
+        <a class="px-3 py-2 rounded bg-slate-900 hover:bg-slate-800" href="/legacy-dashboard">Legacy dashboard</a>
       </div>
 
       {% block content %}{% endblock %}

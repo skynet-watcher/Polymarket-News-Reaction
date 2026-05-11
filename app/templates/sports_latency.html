@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="space-y-6">
+  <div class="flex items-end justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold">Today's Sports Watchlist</h1>
+      <p class="mt-1 text-sm text-slate-400">Paper-only latency tracking for NBA, NHL, and MLB. Trade claims use app-observed independent final timestamps.</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <form class="js-async-job" method="post" action="/api/jobs/sports/build_watchlist" data-job-label="Build sports watchlist" data-done-url="/sports">
+        <button class="rounded bg-emerald-700 px-3 py-2 text-sm hover:bg-emerald-600">Build watchlist</button>
+      </form>
+      <form class="js-async-job" method="post" action="/api/jobs/sports/poll_sources" data-job-label="Poll sports sources" data-done-url="/sports">
+        <button class="rounded bg-teal-700 px-3 py-2 text-sm hover:bg-teal-600">Run poll now</button>
+      </form>
+      <form class="js-async-job" method="post" action="/api/jobs/sports/check_settlements" data-job-label="Check sports settlements" data-done-url="/sports">
+        <button class="rounded bg-cyan-700 px-3 py-2 text-sm hover:bg-cyan-600">Check settlements</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="grid gap-3 md:grid-cols-4">
+    <div class="rounded border border-slate-800 bg-slate-900 p-4">
+      <div class="text-xs uppercase text-slate-500">Watch date</div>
+      <div class="mt-1 text-lg font-semibold">{{ today }}</div>
+    </div>
+    <div class="rounded border border-slate-800 bg-slate-900 p-4">
+      <div class="text-xs uppercase text-slate-500">Markets watched</div>
+      <div class="mt-1 text-lg font-semibold">{{ watch_rows|length }}</div>
+    </div>
+    <div class="rounded border border-slate-800 bg-slate-900 p-4">
+      <div class="text-xs uppercase text-slate-500">Signal cases</div>
+      <div class="mt-1 text-sm text-slate-300">
+        {% if signal_cases %}
+          {% for case, count in signal_cases %}{{ case or "pending" }}: {{ count }}{% if not loop.last %} · {% endif %}{% endfor %}
+        {% else %}
+          pending
+        {% endif %}
+      </div>
+    </div>
+    <div class="rounded border border-slate-800 bg-slate-900 p-4">
+      <div class="text-xs uppercase text-slate-500">Last job</div>
+      <div class="mt-1 text-sm text-slate-300">
+        {% if poll_runs %}{{ poll_runs[0].job_type }} · {{ poll_runs[0].status }}{% else %}none yet{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="overflow-x-auto rounded border border-slate-800">
+    <table class="min-w-full divide-y divide-slate-800 text-sm">
+      <thead class="bg-slate-900 text-left text-xs uppercase text-slate-500">
+        <tr>
+          <th class="px-3 py-2">Market</th>
+          <th class="px-3 py-2">League</th>
+          <th class="px-3 py-2">Start UTC</th>
+          <th class="px-3 py-2">Status</th>
+          <th class="px-3 py-2">Fastest independent</th>
+          <th class="px-3 py-2">Outcome known</th>
+          <th class="px-3 py-2">Polymarket WS</th>
+          <th class="px-3 py-2">Settled</th>
+          <th class="px-3 py-2">Window</th>
+          <th class="px-3 py-2">Action</th>
+          <th class="px-3 py-2">Entry</th>
+          <th class="px-3 py-2">PnL</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-900 bg-slate-950">
+        {% for row in watch_rows %}
+          {% set rec = records.get(row.market_id) %}
+          {% set obs = observations.get(row.market_id) %}
+          {% set trade = trades.get(row.market_id) %}
+          <tr class="align-top">
+            <td class="max-w-sm px-3 py-3">
+              <a class="font-medium text-slate-100 hover:underline" href="/sports/{{ row.market_id }}">{{ row.market_name }}</a>
+              <div class="mt-1 text-xs text-slate-500">{{ row.market_id }}</div>
+              {% if not row.is_clean %}
+                <div class="mt-1 text-xs text-amber-300">Excluded: {{ row.exclusion_reason }}</div>
+              {% endif %}
+            </td>
+            <td class="px-3 py-3">{{ row.league or "unknown" }}</td>
+            <td class="px-3 py-3 text-slate-300">{{ row.scheduled_start_utc or "unknown" }}</td>
+            <td class="px-3 py-3">
+              <span class="rounded bg-slate-800 px-2 py-1 text-xs">{{ row.status }}</span>
+            </td>
+            <td class="px-3 py-3">{{ obs.source if obs else "none" }}</td>
+            <td class="px-3 py-3">{{ rec.independent_source_observed_final_at if rec and rec.independent_source_observed_final_at else "pending" }}</td>
+            <td class="px-3 py-3">{{ rec.polymarket_sports_ws_final_at if rec and rec.polymarket_sports_ws_final_at else "pending" }}</td>
+            <td class="px-3 py-3">{{ rec.polymarket_market_resolved_at if rec and rec.polymarket_market_resolved_at else "pending" }}</td>
+            <td class="px-3 py-3">
+              {% if rec and rec.tradable_window_observed_ms is not none %}
+                {{ "%.1f"|format(rec.tradable_window_observed_ms / 1000) }}s
+              {% else %}
+                pending
+              {% endif %}
+            </td>
+            <td class="px-3 py-3">
+              {% if trade %}
+                {{ trade.sports_trade_type }}
+              {% elif row.exclusion_reason %}
+                {{ row.exclusion_reason }}
+              {% else %}
+                watching
+              {% endif %}
+            </td>
+            <td class="px-3 py-3">
+              {% if trade and trade.sports_trade_type == "paper_trade" %}
+                {{ "%.3f"|format(trade.fill_price) }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td class="px-3 py-3">
+              {% if trade and trade.pnl_final is not none %}
+                {{ "%+.2f"|format(trade.pnl_final) }}
+              {% elif trade and trade.pnl_status == "open" %}
+                open
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="12" class="px-3 py-10 text-center text-slate-400">
+              No sports watchlist rows yet. Build the watchlist to fetch same-day NBA/NHL/MLB markets.
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid gap-4 lg:grid-cols-2">
+    <section class="rounded border border-slate-800 bg-slate-900 p-4">
+      <h2 class="font-semibold">Recent event log</h2>
+      <div class="mt-3 space-y-2 text-sm">
+        {% for event in recent_events %}
+          <div class="border-b border-slate-800 pb-2">
+            <div class="text-slate-300">{{ event.event_at_utc }} · {{ event.event_type }} · {{ event.source or "system" }}</div>
+            <div class="text-xs text-slate-500">{{ event.market_id }}</div>
+          </div>
+        {% else %}
+          <div class="text-slate-400">No watched-event log entries yet.</div>
+        {% endfor %}
+      </div>
+    </section>
+    <section class="rounded border border-slate-800 bg-slate-900 p-4">
+      <h2 class="font-semibold">Recent sports jobs</h2>
+      <div class="mt-3 space-y-2 text-sm">
+        {% for run in poll_runs %}
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+            <span>{{ run.job_type }}</span>
+            <span class="text-slate-400">{{ run.status }} · {{ run.started_at }}</span>
+          </div>
+        {% else %}
+          <div class="text-slate-400">No sports jobs have run yet.</div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

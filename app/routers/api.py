@@ -15,7 +15,7 @@ from app.db import SessionLocal, get_session
 from app.job_status import build_system_status, run_tracked_job
 from app.settings import settings
 from app.util import now_utc
-from app.jobs import backtest_news_reactions, btc_signal_test, bulk_smoke_test, compute_lag, crypto_preflight, lag_rank, nba_test_watchlist, process_candidates, poll_news, settle_trades, short_term_watchlist, signal_metrics, sync_markets, watchlist_monitor
+from app.jobs import backtest_news_reactions, btc_signal_test, bulk_smoke_test, compute_lag, crypto_preflight, lag_rank, nba_test_watchlist, process_candidates, poll_news, settle_trades, short_term_watchlist, signal_metrics, sports_latency, sync_markets, watchlist_monitor
 from app.live_feeds import ensure_live_news_sources
 from sqlalchemy import desc, select
 
@@ -100,6 +100,24 @@ async def job_process_candidates(request: Request, session: AsyncSession = Depen
 async def job_settle_trades(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
     out = await run_tracked_job(session, "settle_trades", lambda: settle_trades.run(session))
     return _job_response(request, out, "/trades")
+
+
+@router.post("/jobs/sports/build_watchlist", response_model=None)
+async def job_sports_build_watchlist(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
+    out = await run_tracked_job(session, "sports_build_watchlist", lambda: sports_latency.build_watchlist(session))
+    return _job_response(request, out, "/sports")
+
+
+@router.post("/jobs/sports/poll_sources", response_model=None)
+async def job_sports_poll_sources(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
+    out = await run_tracked_job(session, "sports_poll_sources", lambda: sports_latency.poll_sources(session))
+    return _job_response(request, out, "/sports")
+
+
+@router.post("/jobs/sports/check_settlements", response_model=None)
+async def job_sports_check_settlements(request: Request, session: AsyncSession = Depends(get_session)) -> Union[JSONResponse, RedirectResponse]:
+    out = await run_tracked_job(session, "sports_check_settlements", lambda: sports_latency.check_settlements(session))
+    return _job_response(request, out, "/sports")
 
 
 @router.post("/jobs/backtest_news_reactions", response_model=None)

@@ -94,7 +94,8 @@ class Settings(BaseSettings):
     # Fee on *positive* settlement PnL (e.g. 0.02 = 2% of winnings — tune to match docs).
     polymarket_winning_profit_fee_rate: float = 0.02
 
-    # Live trading — disabled until execution module is implemented (paper only for MVP).
+    # Sports latency MVP safety: live trading is disabled by policy. Treat this
+    # as a constant even if an environment variable attempts to override it.
     trading_enabled: bool = False
 
     # Dashboard live updates (SSE). Disable if you proxy in a way that breaks chunked streams.
@@ -134,6 +135,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def apply_realtime_paper_quickstart(self):
+        self.trading_enabled = False
         if not self.realtime_paper_quickstart:
             return self
         self.background_poll_news_interval_seconds = min(self.background_poll_news_interval_seconds, 120)

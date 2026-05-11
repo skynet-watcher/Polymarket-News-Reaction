@@ -9,11 +9,8 @@
     { "src": "/(.*)", "dest": "api/index.py" }
   ],
   "crons": [
-    { "path": "/api/cron/sync",         "schedule": "* * * * *"    },
-    { "path": "/api/cron/poll",         "schedule": "* * * * *"    },
-    { "path": "/api/cron/process",      "schedule": "* * * * *"    },
-    { "path": "/api/cron/settle",       "schedule": "*/5 * * * *"  },
-    { "path": "/api/cron/lag-pipeline", "schedule": "0 6 * * *"    },
-    { "path": "/api/cron/pipeline",     "schedule": "0 4 * * *"    }
+    { "path": "/api/cron/sports/build-watchlist", "schedule": "0 0 * * *"    },
+    { "path": "/api/cron/sports/poll",            "schedule": "* * * * *"    },
+    { "path": "/api/cron/sports/settle",          "schedule": "*/5 * * * *"  }
   ]
 }

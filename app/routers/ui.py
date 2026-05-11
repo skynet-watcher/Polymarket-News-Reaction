@@ -28,10 +28,15 @@ from app.models import (
     NewsSource,
     PaperTrade,
     PriceSnapshot,
+    MarketResolutionRecord,
+    PollRun,
     ResolutionSourceMapping,
     RuntimeSetting,
+    SourceObservation,
+    SportsWatchlist,
     SignalDriftWindow,
     ThresholdProfile,
+    WatchedEventLog,
 )
 from app.paper_economics import aggregate_portfolio, live_net_mark_usd
 from app.jobs import nba_test_watchlist, short_term_watchlist
@@ -49,6 +54,11 @@ templates.env.filters["format_lag"] = format_lag_seconds
 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    return await sports_dashboard(request, session)
+
+
+@router.get("/legacy-dashboard", response_class=HTMLResponse)
+async def legacy_dashboard(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
     ctx = await get_dashboard_snapshot(session)
     ctx["request"] = request
     ctx["dashboard_sse_enabled"] = app_settings.dashboard_sse_enabled
@@ -62,6 +72,136 @@ async def dashboard(request: Request, session: AsyncSession = Depends(get_sessio
     ).scalars().all()
     ctx["recent_signals"] = recent
     return templates.TemplateResponse("dashboard.html", ctx)
+
+
+@router.get("/sports", response_class=HTMLResponse)
+async def sports_dashboard(request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    today = now_utc().date()
+    watch_rows = (
+        await session.execute(
+            select(SportsWatchlist)
+            .where(SportsWatchlist.watchlist_date == today)
+            .order_by(SportsWatchlist.scheduled_start_utc.asc().nulls_last(), SportsWatchlist.created_at.desc())
+        )
+    ).scalars().all()
+    market_ids = [row.market_id for row in watch_rows]
+    records = {}
+    observations = {}
+    trades = {}
+    event_counts = {}
+    signal_cases = []
+    recent_events = []
+    poll_runs = (
+        await session.execute(select(PollRun).order_by(desc(PollRun.started_at)).limit(8))
+    ).scalars().all()
+    if market_ids:
+        records = {
+            r.market_id: r
+            for r in (
+                await session.execute(select(MarketResolutionRecord).where(MarketResolutionRecord.market_id.in_(market_ids)))
+            ).scalars().all()
+        }
+        latest_obs_rows = (
+            await session.execute(
+                select(SourceObservation)
+                .where(SourceObservation.market_id.in_(market_ids))
+                .order_by(SourceObservation.observed_at.desc())
+                .limit(500)
+            )
+        ).scalars().all()
+        for obs in latest_obs_rows:
+            observations.setdefault(obs.market_id, obs)
+        trades = {
+            t.sports_watch_market_id: t
+            for t in (
+                await session.execute(
+                    select(PaperTrade)
+                    .where(PaperTrade.sports_watch_market_id.in_(market_ids))
+                    .order_by(desc(PaperTrade.created_at))
+                )
+            ).scalars().all()
+            if t.sports_watch_market_id
+        }
+        count_rows = (
+            await session.execute(
+                select(WatchedEventLog.market_id, func.count().label("count"))
+                .where(WatchedEventLog.market_id.in_(market_ids))
+                .group_by(WatchedEventLog.market_id)
+            )
+        ).all()
+        event_counts = {row[0]: row[1] for row in count_rows}
+        signal_cases = (
+            await session.execute(
+                select(MarketResolutionRecord.signal_case, func.count().label("count"))
+                .where(MarketResolutionRecord.market_id.in_(market_ids))
+                .group_by(MarketResolutionRecord.signal_case)
+            )
+        ).all()
+        recent_events = (
+            await session.execute(
+                select(WatchedEventLog)
+                .where(WatchedEventLog.market_id.in_(market_ids))
+                .order_by(desc(WatchedEventLog.event_at_utc))
+                .limit(40)
+            )
+        ).scalars().all()
+    return templates.TemplateResponse(
+        "sports_latency.html",
+        {
+            "request": request,
+            "title": "Sports Settlement Latency",
+            "watch_rows": watch_rows,
+            "records": records,
+            "observations": observations,
+            "trades": trades,
+            "event_counts": event_counts,
+            "signal_cases": signal_cases,
+            "recent_events": recent_events,
+            "poll_runs": poll_runs,
+            "today": today,
+        },
+    )
+
+
+@router.get("/sports/{market_id}", response_class=HTMLResponse)
+async def sports_market_detail(market_id: str, request: Request, session: AsyncSession = Depends(get_session)) -> HTMLResponse:
+    watch = (
+        await session.execute(
+            select(SportsWatchlist)
+            .where(SportsWatchlist.market_id == market_id)
+            .order_by(desc(SportsWatchlist.created_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    record = await session.get(MarketResolutionRecord, market_id)
+    observations = (
+        await session.execute(
+            select(SourceObservation).where(SourceObservation.market_id == market_id).order_by(SourceObservation.observed_at.asc())
+        )
+    ).scalars().all()
+    events = (
+        await session.execute(
+            select(WatchedEventLog).where(WatchedEventLog.market_id == market_id).order_by(WatchedEventLog.event_at_utc.asc())
+        )
+    ).scalars().all()
+    trades = (
+        await session.execute(
+            select(PaperTrade).where(PaperTrade.sports_watch_market_id == market_id).order_by(desc(PaperTrade.created_at))
+        )
+    ).scalars().all()
+    return templates.TemplateResponse(
+        "sports_market_detail.html",
+        {
+            "request": request,
+            "title": "Sports Market Detail",
+            "watch": watch,
+            "record": record,
+            "observations": observations,
+            "events": events,
+            "trades": trades,
+            "market_id": market_id,
+        },
+    )
 
 
 @router.get("/markets", response_class=HTMLResponse)

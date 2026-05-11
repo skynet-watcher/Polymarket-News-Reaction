@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.job_status import run_tracked_job
-from app.jobs import compute_lag, lag_rank, poll_news, process_candidates, settle_trades, signal_metrics, sync_markets, watchlist_monitor
+from app.jobs import compute_lag, lag_rank, poll_news, process_candidates, settle_trades, signal_metrics, sports_latency, sync_markets, watchlist_monitor
 from app.security import verify_bearer_secret
 
 logger = logging.getLogger(__name__)
@@ -131,3 +131,30 @@ async def cron_lag_pipeline(
             logger.exception("cron_lag_pipeline: %s failed", name)
             results[name] = {"ok": False, "error": str(exc)}
     return JSONResponse({"ok": True, "steps": results})
+
+
+@router.get("/cron/sports/build-watchlist")
+async def cron_sports_build_watchlist(
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(verify_bearer_secret),
+) -> JSONResponse:
+    out = await run_tracked_job(session, "sports_build_watchlist", lambda: sports_latency.build_watchlist(session))
+    return JSONResponse(out)
+
+
+@router.get("/cron/sports/poll")
+async def cron_sports_poll(
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(verify_bearer_secret),
+) -> JSONResponse:
+    out = await run_tracked_job(session, "sports_poll_sources", lambda: sports_latency.poll_sources(session))
+    return JSONResponse(out)
+
+
+@router.get("/cron/sports/settle")
+async def cron_sports_settle(
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(verify_bearer_secret),
+) -> JSONResponse:
+    out = await run_tracked_job(session, "sports_check_settlements", lambda: sports_latency.check_settlements(session))
+    return JSONResponse(out)
